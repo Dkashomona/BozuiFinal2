@@ -1,3 +1,5 @@
+// app/order/tracking.tsx
+
 import { useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import {
@@ -9,9 +11,10 @@ import {
   Button,
 } from "react-native";
 import { db } from "../../src/services/firebase";
-import { doc, onSnapshot, updateDoc } from "firebase/firestore";
+import { doc, onSnapshot, updateDoc, getDoc } from "firebase/firestore";
 import { Ionicons } from "@expo/vector-icons";
 import * as Notifications from "expo-notifications";
+import { useAuth } from "@/src/store/authStore";
 
 const STEPS = [
   { key: "pending", label: "Order Placed", icon: "clipboard-outline" },
@@ -22,15 +25,34 @@ const STEPS = [
 ];
 
 export default function TrackingScreen() {
-  const { id } = useLocalSearchParams(); // orderId
+  const { orderId } = useLocalSearchParams();
+  const id = Array.isArray(orderId) ? orderId[0] : orderId;
+
+  const { currentUser } = useAuth();
+  const [isAdmin, setIsAdmin] = useState(false);
+
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // 🚀 Fetch order live
+  // 🔐 Load user role (admin or customer)
+  useEffect(() => {
+    async function loadRole() {
+      if (!currentUser) return;
+
+      const snap = await getDoc(doc(db, "users", currentUser.uid));
+      if (snap.exists()) {
+        const role = snap.data().role;
+        setIsAdmin(role === "admin");
+      }
+    }
+    loadRole();
+  }, [currentUser]);
+
+  // 🔴 LIVE TRACKING
   useEffect(() => {
     if (!id) return;
 
-    const unsub = onSnapshot(doc(db, "orders", id as string), (snap) => {
+    const unsub = onSnapshot(doc(db, "orders", id), (snap) => {
       if (snap.exists()) {
         setOrder({ id: snap.id, ...snap.data() });
       }
@@ -40,7 +62,7 @@ export default function TrackingScreen() {
     return unsub;
   }, [id]);
 
-  // ⭐ Send push notification
+  // 📲 Optional push notification
   const sendNotification = async (title: string, body: string) => {
     if (!order?.pushToken) return;
     await Notifications.scheduleNotificationAsync({
@@ -49,17 +71,16 @@ export default function TrackingScreen() {
     });
   };
 
-  // ⭐ Admin: Update order status
+  // 🛠 ADMIN — update status
   const updateStatus = async (newStatus: string) => {
-    await updateDoc(doc(db, "orders", id as string), {
+    if (!id || !isAdmin) return;
+
+    await updateDoc(doc(db, "orders", id), {
       status: newStatus,
       updatedAt: new Date(),
     });
 
-    sendNotification(
-      "Order Update",
-      `Your order is now marked as: ${newStatus}`
-    );
+    sendNotification("Order Update", `Your order is now: ${newStatus}`);
   };
 
   if (loading || !order) {
@@ -77,19 +98,16 @@ export default function TrackingScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Order Tracking</Text>
-      <Text style={styles.orderId}>Order ID: {order.orderId}</Text>
+      <Text style={styles.orderId}>Order ID: {order.id}</Text>
 
-      {/* 🚀 PROGRESS BAR */}
+      {/* PROGRESS BAR */}
       <View style={styles.progressBarBackground}>
         <View
-          style={[
-            styles.progressBarFill,
-            { width: `${progress * 100}%` },
-          ]}
+          style={[styles.progressBarFill, { width: `${progress * 100}%` }]}
         />
       </View>
 
-      {/* 🚀 TIMELINE */}
+      {/* TIMELINE */}
       {STEPS.map((step, index) => {
         const isCompleted = index <= currentStep;
         const isActive = order.status === step.key;
@@ -110,24 +128,26 @@ export default function TrackingScreen() {
                 {step.label}
               </Text>
 
-              {isActive && (
-                <Text style={styles.activeNote}>In progress...</Text>
-              )}
+              {isActive && <Text style={styles.activeNote}>In progress…</Text>}
             </View>
           </View>
         );
       })}
 
-      {/* ✨ ADMIN CONTROLS */}
-      <Text style={styles.adminTitle}>Admin Controls</Text>
+      {/* 🛠 ADMIN CONTROLS — Only show for admin */}
+      {isAdmin && (
+        <>
+          <Text style={styles.adminTitle}>Admin Controls</Text>
 
-      {STEPS.map((s) => (
-        <Button
-          key={s.key}
-          title={`Set ${s.label}`}
-          onPress={() => updateStatus(s.key)}
-        />
-      ))}
+          {STEPS.map((s) => (
+            <Button
+              key={s.key}
+              title={`Set ${s.label}`}
+              onPress={() => updateStatus(s.key)}
+            />
+          ))}
+        </>
+      )}
     </ScrollView>
   );
 }
@@ -135,10 +155,10 @@ export default function TrackingScreen() {
 const styles = StyleSheet.create({
   container: { padding: 20 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
+
   title: { fontSize: 32, fontWeight: "bold", marginBottom: 10 },
   orderId: { fontSize: 16, color: "#555", marginBottom: 20 },
 
-  // Progress bar
   progressBarBackground: {
     height: 10,
     backgroundColor: "#ddd",
@@ -151,7 +171,6 @@ const styles = StyleSheet.create({
     borderRadius: 5,
   },
 
-  // Timeline
   stepContainer: {
     flexDirection: "row",
     alignItems: "center",

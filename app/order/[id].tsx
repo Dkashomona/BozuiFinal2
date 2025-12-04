@@ -1,3 +1,5 @@
+/*
+
 import { useEffect, useState } from "react";
 import { View, Text, ActivityIndicator, ScrollView, Button } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -39,13 +41,13 @@ export default function OrderDetailsScreen() {
         Order Details
       </Text>
 
-      {/* ORDER ID */}
+      {/* ORDER ID *
       <Text style={{ fontSize: 16, color: "#555" }}>Order ID:</Text>
       <Text style={{ fontSize: 18, fontWeight: "bold", marginBottom: 20 }}>
         {order.orderId}
       </Text>
 
-      {/* STATUS */}
+      {/* STATUS *
       <Text style={{ fontSize: 16 }}>Status:</Text>
       <Text
         style={{
@@ -58,7 +60,7 @@ export default function OrderDetailsScreen() {
         {order.status.toUpperCase()}
       </Text>
 
-      {/* ITEMS */}
+      {/* ITEMS *
       <Text style={{ fontSize: 22, marginBottom: 10 }}>Items</Text>
 
       {order.items?.map((item: any, i: number) => (
@@ -77,7 +79,7 @@ export default function OrderDetailsScreen() {
         </View>
       ))}
 
-      {/* TOTAL */}
+      {/* TOTAL *
       <View
         style={{
           marginTop: 25,
@@ -92,7 +94,7 @@ export default function OrderDetailsScreen() {
         </Text>
       </View>
 
-      {/* TRACKING BUTTON */}
+      {/* TRACKING BUTTON *
       <Button
         title="Track Order"
         onPress={() =>
@@ -105,3 +107,144 @@ export default function OrderDetailsScreen() {
     </ScrollView>
   );
 }
+  */
+
+// app/order/[id].tsx
+
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+} from "react-native";
+import { useLocalSearchParams, router } from "expo-router";
+import { useEffect, useState } from "react";
+import { db } from "@/src/services/firebase";
+import { doc, getDoc } from "firebase/firestore";
+
+export default function OrderDetails() {
+  const { id } = useLocalSearchParams();
+  const orderId = Array.isArray(id) ? id[0] : id;
+
+  const [order, setOrder] = useState<any>(null);
+
+  useEffect(() => {
+    async function loadOrder() {
+      if (!orderId) return;
+
+      const snap = await getDoc(doc(db, "orders", orderId));
+      if (snap.exists()) {
+        setOrder(snap.data());
+      }
+    }
+    loadOrder();
+  }, [orderId]);
+
+  if (!order) {
+    return (
+      <View style={styles.center}>
+        <Text>Loading order...</Text>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView style={styles.page}>
+      <Text style={styles.title}>Order Details</Text>
+
+      {/* ORDER ID */}
+      <Text style={styles.label}>Order ID:</Text>
+      <Text style={styles.value}>{orderId}</Text>
+
+      {/* STATUS */}
+      <Text style={styles.label}>Status:</Text>
+      <Text
+        style={[
+          styles.status,
+          order.status === "paid" ? styles.paid : styles.processing,
+        ]}
+      >
+        {order.status.toUpperCase()}
+      </Text>
+
+      {/* ITEMS */}
+      <Text style={styles.sectionTitle}>Items</Text>
+
+      {order.items.map((item: any, index: number) => (
+        <View key={index} style={styles.itemBox}>
+          <Text style={styles.itemName}>{item.name}</Text>
+
+          <Text style={styles.itemDetails}>
+            Qty: {item.qty} × ${item.price.toFixed(2)}
+          </Text>
+
+          <Text style={styles.itemTotal}>
+            Total: ${(item.price * item.qty).toFixed(2)}
+          </Text>
+        </View>
+      ))}
+
+      <View style={styles.separator} />
+
+      {/* TOTAL */}
+      <Text style={styles.sectionTitle}>Total</Text>
+      <Text style={styles.total}>${order.total.toFixed(2)}</Text>
+
+      {/* TRACK ORDER */}
+      <TouchableOpacity
+        style={styles.trackButton}
+        onPress={() => router.push(`/order/tracking?orderId=${orderId}`)}
+      >
+        <Text style={styles.trackText}>TRACK ORDER</Text>
+      </TouchableOpacity>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  page: { flex: 1, padding: 20, backgroundColor: "#fff" },
+
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+
+  title: { fontSize: 28, fontWeight: "700", marginBottom: 20 },
+
+  label: { fontSize: 16, fontWeight: "600", marginTop: 10 },
+  value: { fontSize: 16, color: "#555" },
+
+  status: { fontSize: 18, fontWeight: "800", marginTop: 5 },
+  paid: { color: "green" },
+  processing: { color: "#e67e22" },
+
+  sectionTitle: { fontSize: 22, fontWeight: "700", marginTop: 20 },
+
+  itemBox: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderColor: "#eee",
+  },
+
+  itemName: { fontSize: 18, fontWeight: "600" },
+
+  itemDetails: { fontSize: 14, color: "#777", marginTop: 3 },
+
+  itemTotal: { fontSize: 16, marginTop: 5, fontWeight: "600" },
+
+  separator: {
+    height: 1,
+    backgroundColor: "#eee",
+    marginVertical: 20,
+  },
+
+  total: { fontSize: 28, fontWeight: "800", marginBottom: 20 },
+
+  trackButton: {
+    backgroundColor: "#007bff",
+    paddingVertical: 15,
+    borderRadius: 10,
+    alignItems: "center",
+    marginBottom: 40,
+  },
+
+  trackText: { color: "white", fontSize: 18, fontWeight: "700" },
+});

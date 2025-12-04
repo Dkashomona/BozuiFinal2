@@ -1,4 +1,5 @@
 // app/checkout/address.tsx
+
 import {
   View,
   Text,
@@ -23,17 +24,28 @@ export default function AddressScreen() {
   const [phone, setPhone] = useState("");
 
   const saveAddress = async () => {
-    if (!currentUser) return alert("Not logged in");
+    if (!currentUser) {
+      alert("Please log in.");
+      return;
+    }
 
+    const addressData = {
+      fullname,
+      street,
+      city,
+      country,
+      phone,
+    };
+
+    // Save to Firestore
     await setDoc(
       doc(db, "users", currentUser.uid),
-      {
-        address: { fullname, street, city, country, phone },
-      },
+      { address: addressData },
       { merge: true }
     );
 
-    router.back();
+    // Move to next step in checkout flow
+    router.push("/checkout/confirm");
   };
 
   return (
@@ -69,17 +81,18 @@ export default function AddressScreen() {
         style={styles.input}
         value={phone}
         onChangeText={setPhone}
+        keyboardType="phone-pad"
       />
 
       <TouchableOpacity style={styles.saveBtn} onPress={saveAddress}>
-        <Text style={styles.saveText}>Save Address</Text>
+        <Text style={styles.saveText}>Continue</Text>
       </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, padding: 16 },
+  page: { flex: 1, padding: 16, backgroundColor: "#fff" },
   title: { fontSize: 22, fontWeight: "700", marginBottom: 20 },
   input: {
     borderWidth: 1,
@@ -87,12 +100,14 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     marginBottom: 12,
+    fontSize: 16,
   },
   saveBtn: {
     backgroundColor: "#e67e22",
     padding: 16,
     borderRadius: 12,
     alignItems: "center",
+    marginTop: 10,
   },
   saveText: { color: "#fff", fontSize: 18, fontWeight: "700" },
 });
