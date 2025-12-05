@@ -1,7 +1,12 @@
 // src/services/firebase.ts
 
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import {
+  getAuth,
+  browserLocalPersistence,
+} from "firebase/auth";
+import { Platform } from "react-native";
+
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getFunctions } from "firebase/functions";
@@ -15,19 +20,23 @@ const firebaseConfig = {
   appId: "1:536586034208:web:11cc759ecf5ec4a7063045",
 };
 
-// ----------------------------------------------------
-// Initialize Firebase — UNIVERSAL (Expo-safe)
-// ----------------------------------------------------
 export const app = initializeApp(firebaseConfig);
 
-// Standard auth (works on web + Expo Go)
+// -------------------------------------------
+// AUTH
+// -------------------------------------------
+
+// ✔ Web → use browser local persistence
+// ✔ Mobile (Expo Go) → use default memory persistence
 export const auth = getAuth(app);
 
-// Firestore
+if (Platform.OS === "web") {
+  auth.setPersistence(browserLocalPersistence);
+}
+
+// -------------------------------------------
+// Firestore / Storage / Functions
+// -------------------------------------------
 export const db = getFirestore(app);
-
-// Storage
 export const storage = getStorage(app);
-
-// Cloud Functions
 export const functions = getFunctions(app, "us-central1");
