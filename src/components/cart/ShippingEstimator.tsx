@@ -1,3 +1,4 @@
+/*
 import { View, Text, TextInput, StyleSheet } from "react-native";
 import { useState } from "react";
 
@@ -38,4 +39,55 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   note: { marginTop: 8, fontSize: 12, color: "#888" },
+});
+*/
+import { View, Text, TextInput, StyleSheet } from "react-native";
+import { useState } from "react";
+
+export type ShippingEstimatorProps = {
+  onEstimate: (zip: string) => void;
+};
+
+export default function ShippingEstimator({
+  onEstimate,
+}: ShippingEstimatorProps) {
+  const [zip, setZip] = useState("");
+
+  return (
+    <View style={styles.box}>
+      <Text style={styles.label}>Estimate Shipping</Text>
+
+      <TextInput
+        placeholder="Enter ZIP code"
+        style={styles.input}
+        value={zip}
+        keyboardType="number-pad"
+        onChangeText={(t) => {
+          setZip(t);
+          if (t.length >= 5) onEstimate(t);
+        }}
+      />
+
+      <Text style={styles.note}>Shipping depends on your region.</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  box: {
+    backgroundColor: "#fff",
+    padding: 14,
+    borderRadius: 12,
+    marginTop: 12,
+    elevation: 2,
+  },
+  label: { fontWeight: "700", marginBottom: 6, fontSize: 16 },
+  input: {
+    borderWidth: 1,
+    borderColor: "#ddd",
+    padding: 12,
+    borderRadius: 10,
+    fontSize: 15,
+  },
+  note: { marginTop: 8, fontSize: 12, color: "#999" },
 });

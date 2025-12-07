@@ -1,4 +1,3 @@
-// app/admin/shipping-zones/edit/[id].tsx
 import {
   Text,
   TextInput,
@@ -28,6 +27,7 @@ export default function EditShippingZone() {
       if (snap.exists()) {
         const z = snap.data();
         setZone(z);
+
         setName(z.name);
         setCountries(z.countries.join(", "));
         setPrice(String(z.price));
@@ -39,7 +39,7 @@ export default function EditShippingZone() {
     load();
   }, [id]);
 
-  const updateZone = async () => {
+  const save = async () => {
     await updateDoc(doc(db, "shipping_zones", id as string), {
       name,
       countries: countries.split(",").map((s) => s.trim()),
@@ -49,53 +49,62 @@ export default function EditShippingZone() {
       eta,
     });
 
-    alert("Zone updated!");
+    alert("Zone updated");
     router.back();
-  };
-
-  const removeZone = async () => {
-    await deleteDoc(doc(db, "shipping_zones", id as string));
-    alert("Zone removed");
-    router.replace("/admin/shipping-zones");
   };
 
   if (!zone) return null;
 
   return (
     <ScrollView style={styles.page}>
-      <Text style={styles.title}>Edit {zone.name}</Text>
+      <Text style={styles.title}>Edit Shipping Zone</Text>
 
-      <TextInput value={name} onChangeText={setName} style={styles.input} />
+      <TextInput style={styles.input} value={name} onChangeText={setName} />
       <TextInput
+        style={styles.input}
         value={countries}
         onChangeText={setCountries}
-        style={styles.input}
+        placeholder="Country prefixes: 40, 41, 42"
       />
       <TextInput
+        style={styles.input}
         value={price}
         onChangeText={setPrice}
         keyboardType="numeric"
-        style={styles.input}
+        placeholder="Price"
       />
       <TextInput
+        style={styles.input}
         value={minWeight}
         onChangeText={setMinWeight}
         keyboardType="numeric"
-        style={styles.input}
+        placeholder="Min weight (g)"
       />
       <TextInput
+        style={styles.input}
         value={maxWeight}
         onChangeText={setMaxWeight}
         keyboardType="numeric"
-        style={styles.input}
+        placeholder="Max weight (g)"
       />
-      <TextInput value={eta} onChangeText={setEta} style={styles.input} />
+      <TextInput
+        style={styles.input}
+        value={eta}
+        onChangeText={setEta}
+        placeholder="ETA (3-5 days)"
+      />
 
-      <TouchableOpacity style={styles.button} onPress={updateZone}>
-        <Text style={styles.buttonText}>Save Changes</Text>
+      <TouchableOpacity style={styles.saveBtn} onPress={save}>
+        <Text style={styles.saveText}>Save</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.deleteBtn} onPress={removeZone}>
+      <TouchableOpacity
+        style={styles.deleteBtn}
+        onPress={async () => {
+          await deleteDoc(doc(db, "shipping_zones", id as string));
+          router.replace("/admin/shipping-zones");
+        }}
+      >
         <Text style={styles.deleteText}>Delete Zone</Text>
       </TouchableOpacity>
     </ScrollView>
@@ -103,30 +112,27 @@ export default function EditShippingZone() {
 }
 
 const styles = StyleSheet.create({
-  page: { padding: 20, backgroundColor: "#fff" },
-  title: { fontSize: 26, fontWeight: "700", marginBottom: 20 },
+  page: { padding: 20 },
+  title: { fontSize: 24, fontWeight: "700", marginBottom: 20 },
   input: {
     borderWidth: 1,
     borderColor: "#ccc",
     padding: 14,
-    borderRadius: 12,
+    borderRadius: 10,
     marginBottom: 12,
   },
-  button: {
-    backgroundColor: "#e67e22",
+  saveBtn: {
+    backgroundColor: "#27ae60",
     padding: 16,
-    borderRadius: 12,
+    borderRadius: 10,
     marginTop: 10,
-    alignItems: "center",
   },
-  buttonText: { color: "white", fontWeight: "700", fontSize: 18 },
-
+  saveText: { color: "white", textAlign: "center", fontWeight: "700" },
   deleteBtn: {
-    backgroundColor: "#c0392b",
+    backgroundColor: "#e74c3c",
     padding: 16,
-    borderRadius: 12,
+    borderRadius: 10,
     marginTop: 20,
-    alignItems: "center",
   },
-  deleteText: { color: "white", fontWeight: "700", fontSize: 16 },
+  deleteText: { textAlign: "center", color: "white", fontWeight: "700" },
 });

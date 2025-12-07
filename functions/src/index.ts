@@ -1,212 +1,7 @@
-/*
-
-import * as functions from "firebase-functions";
-import * as admin from "firebase-admin";
-import Stripe from "stripe";
-import cors from "cors";
-
-admin.initializeApp();
-const db = admin.firestore();
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2023-10-16",
-});
-
-const corsHandler = cors({ origin: true });
-
-async function getOrCreateCustomer(uid: string) {
-  const ref = db.collection("users").doc(uid);
-  const snap = await ref.get();
-
-  if (snap.exists && snap.data()?.stripeCustomerId) {
-    return snap.data()?.stripeCustomerId;
-  }
-
-  const customer = await stripe.customers.create({ metadata: { uid } });
-  await ref.set({ stripeCustomerId: customer.id }, { merge: true });
-  return customer.id;
-}
-
-/* ---------------------------------------------------------
-   CREATE ORDER (WEB)
---------------------------------------------------------- *
-export const createOrder = functions.https.onRequest((req, res) => {
-  corsHandler(req, res, () => {
-    const { items, amount, address, uid } = req.body;
-
-    if (!uid) {
-      res.status(400).json({ error: "Missing UID" });
-      return;
-    }
-
-    const orderRef = db.collection("orders").doc();
-    const orderId = orderRef.id;
-
-    orderRef
-      .set({
-        orderId,
-        uid,
-        items,
-        amount,
-        address,
-        status: "pending",
-        paymentIntentId: null,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      })
-      .then(() => {
-        res.json({ orderId });
-      })
-      .catch((err) => {
-        console.error("createOrder error:", err);
-        res.status(500).send(err.message);
-      });
-  });
-});
-
-/* ---------------------------------------------------------
-   MOBILE PAYMENT SHEET (onCall)
---------------------------------------------------------- *
-export const createPaymentSheet = functions.https.onCall(async (data, context) => {
-  const uid = context.auth?.uid;
-
-  if (!uid) {
-    throw new functions.https.HttpsError(
-      "unauthenticated",
-      "User must be logged in"
-    );
-  }
-
-  const { orderId } = data;
-  if (!orderId) {
-    throw new functions.https.HttpsError("invalid-argument", "orderId missing");
-  }
-
-  const orderSnap = await db.collection("orders").doc(orderId).get();
-  if (!orderSnap.exists) {
-    throw new functions.https.HttpsError("not-found", "Order not found");
-  }
-
-  const amount = orderSnap.data()!.amount;
-  const customerId = await getOrCreateCustomer(uid);
-
-  const ephemeralKey = await stripe.ephemeralKeys.create(
-    { customer: customerId },
-    { apiVersion: "2024-06-20" }
-  );
-
-  const pi = await stripe.paymentIntents.create({
-    amount,
-    currency: "usd",
-    customer: customerId,
-    metadata: { orderId, uid },
-    automatic_payment_methods: { enabled: true },
-  });
-
-  await orderSnap.ref.update({ paymentIntentId: pi.id });
-
-  return {
-    paymentIntent: pi.client_secret,
-    ephemeralKey: ephemeralKey.secret,
-    customer: customerId,
-  };
-});
-
-/* ---------------------------------------------------------
-   WEB CHECKOUT SESSION
---------------------------------------------------------- *
-export const createCheckoutSession = functions.https.onRequest((req, res) => {
-  corsHandler(req, res, () => {
-    const { orderId, uid } = req.body;
-
-    if (!orderId || !uid) {
-      res.status(400).send("Missing orderId or uid");
-      return;
-    }
-
-    db.collection("orders")
-      .doc(orderId)
-      .get()
-      .then(async (snap) => {
-        if (!snap.exists) {
-          res.status(404).send("Order not found");
-          return;
-        }
-
-        const amount = snap.data()!.amount;
-        const customerId = await getOrCreateCustomer(uid);
-
-        const session = await stripe.checkout.sessions.create({
-          mode: "payment",
-          payment_method_types: ["card"],
-          customer: customerId,
-          metadata: { orderId, uid },
-          line_items: [
-            {
-              price_data: {
-                currency: "usd",
-                product_data: { name: `Order #${orderId}` },
-                unit_amount: amount,
-              },
-              quantity: 1,
-            },
-          ],
-          success_url: `http://localhost:8081/order/${orderId}`,
-          cancel_url: `http://localhost:8081/checkout/payment?cancel=1`,
-        });
-
-        res.json({ url: session.url });
-      })
-      .catch((err) => {
-        console.error("createCheckoutSession error:", err);
-        res.status(500).send(err.message);
-      });
-  });
-});
-
-/* ---------------------------------------------------------
-   STRIPE WEBHOOK
---------------------------------------------------------- *
-export const stripeWebhook = functions.https.onRequest((req, res) => {
-  let event;
-
-  try {
-    event = stripe.webhooks.constructEvent(
-      req.rawBody,
-      req.headers["stripe-signature"] as string,
-      process.env.STRIPE_WEBHOOK_SECRET!
-    );
-  } catch (err: any) {
-    res.status(400).send(`Webhook Error: ${err.message}`);
-    return;
-  }
-
-  const paid = async (oid: string) => {
-    await db.collection("orders").doc(oid).update({
-      status: "paid",
-      paidAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-  };
-
-  const type = event.type;
-
-  if (type === "checkout.session.completed") {
-    paid((event.data.object as any).metadata.orderId);
-  }
-
-  if (type === "payment_intent.succeeded") {
-    paid((event.data.object as any).metadata.orderId);
-  }
-
-  res.json({ received: true });
-});
-*/
-
-
-
 /* ===========================================================
-   FIREBASE FUNCTIONS — FINAL FULL VERSION (BATCH 1–5)
-   Includes: Orders, Payments, Web Checkout, Inventory Logs,
-   Adjust Stock, Shipping Zones, Notifications, Payouts, Refunds
+   FIREBASE STRIPE FUNCTIONS — TS-CLEAN VERSION
+   ✔ No Response return errors
+   ✔ Stripe checkout and payment sheet fixed
 =========================================================== */
 
 import * as functions from "firebase-functions";
@@ -221,13 +16,12 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2023-10-16",
 });
 
-// CORS for REST
 const corsHandler = cors({ origin: true });
 
-/* --------------------------------------------------------
-   UTIL — GET OR CREATE STRIPE CUSTOMER
--------------------------------------------------------- */
-async function getOrCreateCustomer(uid: string) {
+/* ---------------------------------------------------------
+   UTIL — GET OR CREATE CUSTOMER
+--------------------------------------------------------- */
+async function getOrCreateCustomer(uid: string): Promise<string> {
   const ref = db.collection("users").doc(uid);
   const snap = await ref.get();
 
@@ -236,22 +30,23 @@ async function getOrCreateCustomer(uid: string) {
   }
 
   const customer = await stripe.customers.create({ metadata: { uid } });
+
   await ref.set({ stripeCustomerId: customer.id }, { merge: true });
 
   return customer.id;
 }
 
-/* --------------------------------------------------------
-   UTIL — SEND ADMIN PUSH NOTIFICATION (Expo Push Token)
--------------------------------------------------------- */
-async function sendAdminNotification(message: string) {
-  const devices = await db.collection("admin_devices").get();
-  if (devices.empty) return;
+/* ---------------------------------------------------------
+   UTIL — NOTIFY ADMINS
+--------------------------------------------------------- */
+async function sendAdminNotification(message: string): Promise<void> {
+  const snap = await db.collection("admin_devices").get();
+  if (snap.empty) return;
 
-  const payload = devices.docs.map((d) => ({
+  const payload = snap.docs.map((d) => ({
     to: d.data().expoPushToken,
     sound: "default",
-    title: "🟧 Admin Alert",
+    title: "Admin Alert",
     body: message,
   }));
 
@@ -262,55 +57,62 @@ async function sendAdminNotification(message: string) {
   });
 }
 
-/* --------------------------------------------------------
-   1) CREATE ORDER (WEB & APP)
--------------------------------------------------------- */
+/* ---------------------------------------------------------
+   1) CREATE ORDER
+--------------------------------------------------------- */
 export const createOrder = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     try {
       const { items, amount, address, uid } = req.body;
 
-      if (!uid) return res.status(400).json({ error: "Missing UID" });
+      if (!uid) {
+        res.status(400).json({ error: "Missing UID" });
+        return;
+      }
 
-      const orderRef = db.collection("orders").doc();
-      const orderId = orderRef.id;
+      // ALWAYS SAVE AS CENTS
+      const amountInCents = Math.round(Number(amount) * 100);
 
-      await orderRef.set({
+      const orderId = db.collection("orders").doc().id;
+
+      await db.collection("orders").doc(orderId).set({
         orderId,
         uid,
         items,
-        amount,
+        amount: amountInCents,   // ← IMPORTANT
         address,
         status: "pending",
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         paymentIntentId: null,
       });
 
-      // Notify admin
-      await sendAdminNotification(`🛒 New Order #${orderId} received`);
-
       res.json({ orderId });
+      return;
     } catch (err: any) {
+      console.error("createOrder error:", err);
       res.status(500).send(err.message);
+      return;
     }
   });
 });
 
-/* --------------------------------------------------------
-   2) CREATE PAYMENT SHEET (Mobile)
--------------------------------------------------------- */
+
+/* ---------------------------------------------------------
+   2) PAYMENT SHEET (MOBILE)
+--------------------------------------------------------- */
 export const createPaymentSheet = functions.https.onCall(async (data, context) => {
   const uid = context.auth?.uid;
   if (!uid) throw new functions.https.HttpsError("unauthenticated", "Login required");
 
   const { orderId } = data;
-  if (!orderId) throw new functions.https.HttpsError("invalid-argument", "Missing orderId");
+  if (!orderId)
+    throw new functions.https.HttpsError("invalid-argument", "Missing orderId");
 
-  const orderSnap = await db.collection("orders").doc(orderId).get();
-  if (!orderSnap.exists) throw new functions.https.HttpsError("not-found", "Order missing");
+  const snap = await db.collection("orders").doc(orderId).get();
+  if (!snap.exists)
+    throw new functions.https.HttpsError("not-found", "Order not found");
 
-  const amount = orderSnap.data()!.amount;
-
+  const order = snap.data()!;
   const customerId = await getOrCreateCustomer(uid);
 
   const ephemeralKey = await stripe.ephemeralKeys.create(
@@ -319,14 +121,14 @@ export const createPaymentSheet = functions.https.onCall(async (data, context) =
   );
 
   const pi = await stripe.paymentIntents.create({
-    amount,
+    amount: order.amount,
     currency: "usd",
     customer: customerId,
-    metadata: { orderId, uid },
     automatic_payment_methods: { enabled: true },
+    metadata: { orderId, uid },
   });
 
-  await orderSnap.ref.update({ paymentIntentId: pi.id });
+  await snap.ref.update({ paymentIntentId: pi.id });
 
   return {
     paymentIntent: pi.client_secret,
@@ -335,47 +137,86 @@ export const createPaymentSheet = functions.https.onCall(async (data, context) =
   };
 });
 
-/* --------------------------------------------------------
-   3) WEB CHECKOUT SESSION (Stripe Checkout)
--------------------------------------------------------- */
+/* ---------------------------------------------------------
+   3) WEB CHECKOUT SESSION
+--------------------------------------------------------- */
 export const createCheckoutSession = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
-    const { orderId, uid } = req.body;
+    try {
+      const { orderId, uid } = req.body;
 
-    if (!orderId || !uid) return res.status(400).send("Missing params");
+      if (!orderId || !uid) {
+        res.status(400).send("Missing orderId or uid");
+        return;
+      }
 
-    const snap = await db.collection("orders").doc(orderId).get();
-    if (!snap.exists) return res.status(404).send("Order not found");
+      const snap = await db.collection("orders").doc(orderId).get();
 
-    const amount = snap.data()!.amount;
-    const customerId = await getOrCreateCustomer(uid);
+      if (!snap.exists) {
+        res.status(404).send("Order not found");
+        return;
+      }
 
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      customer: customerId,
-      metadata: { orderId, uid },
-      payment_method_types: ["card"],
-      line_items: [
-        {
+      // ⭐ FIX: safely extract order data
+      const order = snap.data();
+      if (!order) {
+        res.status(500).send("Order data is missing");
+        return;
+      }
+
+      const items = order.items;
+      if (!items || items.length === 0) {
+        res.status(400).send("Order has no items");
+        return;
+      }
+
+      // ⭐ FIX: Validate each item & price
+      const lineItems = items.map((item: any) => {
+        const price = Number(item.price);
+
+        if (!price || isNaN(price)) {
+          console.error("Invalid price in item:", item);
+          throw new Error(`Invalid price for item ${item?.name ?? "Unnamed product"}`);
+        }
+
+        return {
+          quantity: item.qty ?? 1,
           price_data: {
             currency: "usd",
-            product_data: { name: `Order #${orderId}` },
-            unit_amount: amount,
+            product_data: {
+              name: item.name || "Product",
+            },
+            unit_amount: Math.round(price * 100), // convert to cents
           },
-          quantity: 1,
-        },
-      ],
-      success_url: `https://yourapp.com/order/${orderId}`,
-      cancel_url: `https://yourapp.com/checkout/payment?cancel=1`,
-    });
+        };
+      });
 
-    res.json({ url: session.url });
+      const customerId = await getOrCreateCustomer(uid);
+
+      const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        customer: customerId,
+        metadata: { orderId, uid },
+        line_items: lineItems,
+        success_url: `http://localhost:8081/order/${orderId}`,
+        cancel_url: `http://localhost:8081/checkout/payment?cancel=1`,
+      });
+
+      res.json({ url: session.url });
+      return;
+
+    } catch (err: any) {
+      console.error("🔥 Stripe Checkout Error:", err);
+      res.status(500).json({ error: err.message });
+      return;
+    }
   });
 });
 
-/* --------------------------------------------------------
-   4) STRIPE WEBHOOK → CONFIRM PAYMENT
--------------------------------------------------------- */
+
+/* ---------------------------------------------------------
+   4) STRIPE WEBHOOK
+--------------------------------------------------------- */
 export const stripeWebhook = functions.https.onRequest(async (req, res) => {
   let event;
 
@@ -396,25 +237,26 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
       paidAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    await sendAdminNotification(`💳 Order #${orderId} marked as PAID`);
+    await sendAdminNotification(`💳 Order #${orderId} PAID`);
   }
 
-  const type = event.type;
+  switch (event.type) {
+    case "checkout.session.completed":
+      await markPaid((event.data.object as any).metadata.orderId);
+      break;
 
-  if (type === "checkout.session.completed") {
-    await markPaid((event.data.object as any).metadata.orderId);
-  }
-
-  if (type === "payment_intent.succeeded") {
-    await markPaid((event.data.object as any).metadata.orderId);
+    case "payment_intent.succeeded":
+      await markPaid((event.data.object as any).metadata.orderId);
+      break;
   }
 
   res.json({ received: true });
+  return;
 });
 
-/* --------------------------------------------------------
-   5) ADMIN — MANUAL PAYOUT
--------------------------------------------------------- */
+/* ---------------------------------------------------------
+   5) ADMIN PAYOUT
+--------------------------------------------------------- */
 export const createManualPayout = functions.https.onCall(async (data, context) => {
   const uid = context.auth?.uid;
   if (!uid) throw new functions.https.HttpsError("unauthenticated", "Admin only");
@@ -435,37 +277,38 @@ export const createManualPayout = functions.https.onCall(async (data, context) =
   return { payoutId: payout.id, status: payout.status };
 });
 
-/* --------------------------------------------------------
-   6) REFUND ENDPOINT (Basic)
--------------------------------------------------------- */
+/* ---------------------------------------------------------
+   6) REFUND
+--------------------------------------------------------- */
 export const issueRefund = functions.https.onCall(async (data, context) => {
   const uid = context.auth?.uid;
   if (!uid) throw new functions.https.HttpsError("unauthenticated", "Admin only");
 
-  const adminDoc = await db.collection("users").doc(uid).get();
-  if (adminDoc.data()?.role !== "admin")
+  const user = await db.collection("users").doc(uid).get();
+  if (user.data()?.role !== "admin")
     throw new functions.https.HttpsError("permission-denied", "Admins only");
 
   const { paymentIntentId } = data;
   if (!paymentIntentId)
-    throw new functions.https.HttpsError("invalid-argument", "Missing PI ID");
+    throw new functions.https.HttpsError("invalid-argument", "Missing paymentIntentId");
 
-  const refund = await stripe.refunds.create({ payment_intent: paymentIntentId });
+  const refund = await stripe.refunds.create({
+    payment_intent: paymentIntentId,
+  });
 
   return { refundId: refund.id, status: refund.status };
 });
 
-/* --------------------------------------------------------
-   7) INVENTORY — ADJUST STOCK
--------------------------------------------------------- */
+/* ---------------------------------------------------------
+   7) ADJUST STOCK
+--------------------------------------------------------- */
 export const adjustStock = functions.https.onCall(async (data, context) => {
   const uid = context.auth?.uid;
-  if (!uid) throw new functions.https.HttpsError("unauthenticated", "Admin must be logged in");
+  if (!uid) throw new functions.https.HttpsError("unauthenticated", "Admin only");
 
   const user = await db.collection("users").doc(uid).get();
   if (user.data()?.role !== "admin")
-    throw new functions.https.HttpsError("permission-denied", "You are not an admin");
-;
+    throw new functions.https.HttpsError("permission-denied", "Admins only");
 
   const { productId, change } = data;
 
@@ -485,53 +328,4 @@ export const adjustStock = functions.https.onCall(async (data, context) => {
   });
 
   return { newStock };
-});
-
-/* --------------------------------------------------------
-   8) SHIPPING ZONES (Add + Edit)
--------------------------------------------------------- */
-export const saveShippingZone = functions.https.onCall(async (data, context) => {
-  const uid = context.auth?.uid;
-  if (!uid) throw new functions.https.HttpsError("unauthenticated", "User must be logged in");
-;
-
-  const adminDoc = await db.collection("users").doc(uid).get();
-  if (adminDoc.data()?.role !== "admin")
-    throw  new functions.https.HttpsError("permission-denied", "You are not an admin");
-
-
-  const { id, name, price, regions } = data;
-
-  if (id) {
-    await db.collection("shipping_zones").doc(id).update({ name, price, regions });
-    return { updated: id };
-  }
-
-  const newRef = await db.collection("shipping_zones").add({
-    name,
-    price,
-    regions,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
-
-  return { created: newRef.id };
-});
-
-/* --------------------------------------------------------
-   9) ANALYTICS HELPERS
--------------------------------------------------------- */
-export const analyticsTotals = functions.https.onCall(async () => {
-  const orders = await db.collection("orders").get();
-  let totalRevenue = 0;
-
-  orders.forEach((d) => {
-    if (d.data().status === "paid") {
-      totalRevenue += d.data().amount;
-    }
-  });
-
-  return {
-    orders: orders.size,
-    revenue: totalRevenue,
-  };
 });

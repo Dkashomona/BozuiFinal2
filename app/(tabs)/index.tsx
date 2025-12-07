@@ -1,113 +1,147 @@
 /*
-
-import { router } from "expo-router";
-import { Button, StyleSheet, Text, View } from "react-native";
-import CampaignSlider from "../../src/components/home/CampaignSlider";
-import ProductFeed from "../../src/components/home/ProductFeed";
-import SearchBar from "../../src/components/home/SearchBar";
-import { useAuth } from "../../src/store/authStore";
-import CartIcon from "../../src/components/cart/CartIcon";
-
-export default function HomeScreen() {
-  const { role, loading } = useAuth();
-
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <Text>Loading...</Text>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.page}>
-      <View style={styles.topStatic}>
-        {role === "admin" && (
-          <>
-            <View style={styles.adminBadge}>
-              <Text style={styles.adminText}>ADMIN MODE</Text>
-            </View>
-            <View style={{ marginBottom: 16 }}>
-              <Button
-                title="🛠 Go to Admin Dashboard"
-                onPress={() => router.push("/admin")}
-              />
-            </View>
-          </>
-        )}
-
-        <View style={{ flexDirection: "row", alignItems: "center" }}>
-          <SearchBar />
-          <CartIcon />
-        </View>
-
-        <CampaignSlider />
-
-        <Text style={styles.sectionTitle}>🧺 All Products</Text>
-      </View>
-
-      <View style={styles.productArea}>
-        <ProductFeed />
-      </View>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  page: {
-    flex: 1,
-    backgroundColor: "#f5f5f5",
-  },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  topStatic: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-  },
-  productArea: {
-    flex: 1,
-    paddingHorizontal: 16,
-  },
-  sectionTitle: {
-    fontSize: 22,
-    fontWeight: "700",
-    marginVertical: 16,
-  },
-  adminBadge: {
-    backgroundColor: "#4A90E2",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    alignSelf: "flex-start",
-    marginBottom: 10,
-  },
-  adminText: {
-    color: "white",
-    fontWeight: "bold",
-    fontSize: 12,
-  },
-});
-
-*/
 import { router } from "expo-router";
 import {
-  Button,
   StyleSheet,
   Text,
   View,
   Platform,
   useWindowDimensions,
   ScrollView,
+  TouchableOpacity,
 } from "react-native";
+import { useAuth } from "../../src/store/authStore";
+import SearchBar from "../../src/components/home/SearchBar";
+import CartIcon from "../../src/components/cart/CartIcon";
 import CampaignSlider from "../../src/components/home/CampaignSlider";
 import ProductFeed from "../../src/components/home/ProductFeed";
-import SearchBar from "../../src/components/home/SearchBar";
-import { useAuth } from "../../src/store/authStore";
-import CartIcon from "../../src/components/cart/CartIcon";
 
 export default function HomeScreen() {
-  const { role, loading } = useAuth();
+  const { currentUser, loading } = useAuth();
+  const name = currentUser?.displayName ?? "Guest";
+
   useWindowDimensions();
   const isWeb = Platform.OS === "web";
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <Text>Loading…</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.page}>
+      {/* ▼ AMAZON STYLE HEADER *
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.headerHello}>Hello, {name}</Text>
+
+          {currentUser ? (
+            <Text style={styles.headerSub}>
+              Delivering to: {currentUser.address?.city || "Set your address"}
+            </Text>
+          ) : (
+            <TouchableOpacity onPress={() => router.push("/login")}>
+              <Text style={styles.headerLoginLink}>Sign in for delivery</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <CartIcon />
+      </View>
+
+      <SearchBar />
+
+      {/* WEB SCROLL WRAPPER *
+      {isWeb ? (
+        <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+          <CampaignSlider />
+          <Text style={styles.section}>Featured Deals</Text>
+          <ProductFeed isWeb />
+        </ScrollView>
+      ) : (
+        <>
+          <CampaignSlider />
+          <Text style={styles.section}>Featured Deals</Text>
+          <ProductFeed />
+        </>
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  page: { flex: 1, backgroundColor: "#f5f5f5" },
+
+  header: {
+    backgroundColor: "#0f1111",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+
+  headerHello: { color: "white", fontSize: 18, fontWeight: "700" },
+
+  headerSub: { color: "#d1d1d1", fontSize: 13 },
+
+  headerLoginLink: {
+    color: "#87CEFA",
+    fontSize: 13,
+    textDecorationLine: "underline",
+    marginTop: 2,
+  },
+
+  section: { fontSize: 20, fontWeight: "700", margin: 16 },
+
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+});
+*/
+
+import { router } from "expo-router";
+import {
+  StyleSheet,
+  Text,
+  View,
+  Platform,
+  useWindowDimensions,
+  ScrollView,
+  TouchableOpacity,
+} from "react-native";
+import { useState, useCallback } from "react";
+import { Ionicons } from "@expo/vector-icons";
+import { useAuth } from "@/src/store/authStore";
+
+import SearchBar from "@/src/components/home/SearchBar";
+import CartIcon from "@/src/components/cart/CartIcon";
+import CampaignSlider from "@/src/components/home/CampaignSlider";
+import ProductFeed from "@/src/components/home/ProductFeed";
+
+export default function HomeScreen() {
+  const { currentUser, role, loading } = useAuth();
+  const name = currentUser?.displayName ?? "Guest";
+
+  const isWeb = Platform.OS === "web";
+  useWindowDimensions();
+
+  /** FILTER STATES **/
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("All");
+  const [subcategory, setSubcategory] = useState("All");
+  const [min, setMin] = useState<number | null>(null);
+  const [max, setMax] = useState<number | null>(null);
+
+  /** FILTER CALLBACKS **/
+  const handleSearch = useCallback((v: string) => setQuery(v), []);
+  const handleCategory = useCallback((c: string) => {
+    setCategory(c);
+    setSubcategory("All");
+  }, []);
+  const handleSubcategory = useCallback((s: string) => setSubcategory(s), []);
+  const handleMin = useCallback((v: number) => setMin(v), []);
+  const handleMax = useCallback((v: number) => setMax(v), []);
 
   if (loading) {
     return (
@@ -117,93 +151,120 @@ export default function HomeScreen() {
     );
   }
 
-  // 🔥 Desktop/web layout → ScrollView wrapper
-  if (isWeb) {
-    return (
-      <View style={styles.page}>
-        <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-          <View style={styles.topStatic}>
-            {role === "admin" && (
-              <>
-                <View style={styles.adminBadge}>
-                  <Text style={styles.adminText}>ADMIN MODE</Text>
-                </View>
-                <View style={{ marginBottom: 16 }}>
-                  <Button
-                    title="🛠 Go to Admin Dashboard"
-                    onPress={() => router.push("/admin")}
-                  />
-                </View>
-              </>
-            )}
-
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <SearchBar />
-              <CartIcon />
-            </View>
-
-            <CampaignSlider />
-
-            <Text style={styles.sectionTitle}>🧺 All Products</Text>
-          </View>
-
-          <View style={styles.productArea}>
-            {/* 🔥 tell ProductFeed to render in web mode */}
-            <ProductFeed isWeb />
-          </View>
-        </ScrollView>
-      </View>
-    );
-  }
-
-  // 🔥 Mobile/tablet layout → FlatList handles scrolling
   return (
     <View style={styles.page}>
-      <View style={styles.topStatic}>
-        {role === "admin" && (
-          <>
-            <View style={styles.adminBadge}>
-              <Text style={styles.adminText}>ADMIN MODE</Text>
-            </View>
-            <View style={{ marginBottom: 16 }}>
-              <Button
-                title="🛠 Go to Admin Dashboard"
-                onPress={() => router.push("/admin")}
-              />
-            </View>
-          </>
-        )}
-
+      {/* HEADER BAR */}
+      <View style={styles.header}>
         <View style={{ flexDirection: "row", alignItems: "center" }}>
-          <SearchBar />
-          <CartIcon />
+          <Ionicons
+            name="location-outline"
+            size={20}
+            color="white"
+            style={{ marginRight: 8 }}
+          />
+          <View>
+            <Text style={styles.headerHello}>Hello, {name}</Text>
+            {currentUser ? (
+              <Text style={styles.headerSub}>
+                Delivering to: {currentUser.address?.city || "Set your address"}
+              </Text>
+            ) : (
+              <TouchableOpacity onPress={() => router.push("/login")}>
+                <Text style={styles.headerLoginLink}>Sign in for delivery</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
-        <CampaignSlider />
-
-        <Text style={styles.sectionTitle}>🧺 All Products</Text>
+        <CartIcon />
       </View>
 
-      <View style={styles.productArea}>
-        <ProductFeed />
-      </View>
+      {/* SEARCH */}
+      <SearchBar
+        onSearch={handleSearch}
+        onCategory={handleCategory}
+        onSubcategory={handleSubcategory}
+        onMin={handleMin}
+        onMax={handleMax}
+      />
+
+      {/* ADMIN BUTTON */}
+      {role === "admin" && (
+        <TouchableOpacity
+          style={styles.adminBtn}
+          onPress={() => router.push("/admin")}
+        >
+          <Text style={styles.adminText}>Admin Panel</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* === WEB LAYOUT (SCROLLVIEW OK) === */}
+      {isWeb ? (
+        <ScrollView contentContainerStyle={{ paddingBottom: 100 }}>
+          <CampaignSlider />
+          <Text style={styles.section}>Featured Deals</Text>
+
+          <ProductFeed
+            isWeb
+            query={query}
+            category={category}
+            subcategory={subcategory}
+            min={min}
+            max={max}
+          />
+        </ScrollView>
+      ) : (
+        /* === MOBILE LAYOUT — NO SCROLLVIEW === */
+        <>
+          <CampaignSlider />
+          <Text style={styles.section}>Featured Deals</Text>
+
+          <ProductFeed
+            query={query}
+            category={category}
+            subcategory={subcategory}
+            min={min}
+            max={max}
+          />
+        </>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#f5f5f5" },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  topStatic: { paddingHorizontal: 16, paddingTop: 16 },
-  productArea: { flex: 1, paddingHorizontal: 16 },
-  sectionTitle: { fontSize: 22, fontWeight: "700", marginVertical: 16 },
-  adminBadge: {
-    backgroundColor: "#4A90E2",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    alignSelf: "flex-start",
-    marginBottom: 10,
+
+  header: {
+    backgroundColor: "#0f1111",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
-  adminText: { color: "white", fontWeight: "bold", fontSize: 12 },
+
+  headerHello: { color: "white", fontSize: 17, fontWeight: "700" },
+  headerSub: { color: "#d1d1d1", fontSize: 13 },
+  headerLoginLink: {
+    color: "#87CEFA",
+    fontSize: 13,
+    textDecorationLine: "underline",
+  },
+
+  section: { fontSize: 20, fontWeight: "700", margin: 16 },
+
+  adminBtn: {
+    alignSelf: "flex-end",
+    backgroundColor: "#FFD814",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginRight: 14,
+    marginTop: 4,
+  },
+
+  adminText: { fontWeight: "700", color: "#111" },
+
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
 });

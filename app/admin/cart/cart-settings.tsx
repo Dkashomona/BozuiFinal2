@@ -14,75 +14,75 @@ import { doc, updateDoc, setDoc, onSnapshot } from "firebase/firestore";
 export default function CartSettingsScreen() {
   const [config, setConfig] = useState<any>(null);
 
-  const [thresholdInput, setThresholdInput] = useState("");
-  const [rewardInput, setRewardInput] = useState("");
+  // MAIN SETTINGS
+  const [defaultRegion, setDefaultRegion] = useState("");
+  const [defaultShippingPrice, setDefaultShippingPrice] = useState("");
+  const [freeShippingThreshold, setFreeShippingThreshold] = useState("");
 
+  // PROMO MANAGEMENT
   const [selectedPromo, setSelectedPromo] = useState<string | null>(null);
   const [promoCode, setPromoCode] = useState("");
   const [promoType, setPromoType] = useState("PERCENT");
   const [promoValue, setPromoValue] = useState("");
-
   const [maxUserInput, setMaxUserInput] = useState("");
   const [maxTotalInput, setMaxTotalInput] = useState("");
 
   /* ---------------------------------------------------
-      REAL-TIME FIRESTORE SYNC
+        LIVE FIRESTORE SYNC
   --------------------------------------------------- */
   useEffect(() => {
     const ref = doc(db, "settings", "cartConfig");
 
-    const unsubscribe = onSnapshot(ref, async (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        setConfig(data);
-
-        setThresholdInput(String(data.spendThreshold ?? ""));
-        setRewardInput(String(data.rewardAmount ?? ""));
-      } else {
+    const unsub = onSnapshot(ref, async (snap) => {
+      if (!snap.exists()) {
+        // FIRST TIME SETUP
         const defaults = {
-          spendThreshold: 100,
-          rewardAmount: 15,
+          defaultRegion: "KY",
+          defaultShippingPrice: 0,
+          freeShippingThreshold: 75,
           promoText: "Spend ${{missing}} more to unlock ${{reward}} OFF!",
           unlockedText: "🎉 You unlocked ${{reward}} OFF!",
           activePromos: {},
         };
         await setDoc(ref, defaults);
         setConfig(defaults);
+        return;
       }
+
+      const data = snap.data();
+      setConfig(data);
+
+      setDefaultRegion(data.defaultRegion ?? "KY");
+      setDefaultShippingPrice(String(data.defaultShippingPrice ?? "0"));
+      setFreeShippingThreshold(String(data.freeShippingThreshold ?? "75"));
     });
 
-    return unsubscribe;
+    return unsub;
   }, []);
 
   if (!config) return <Text style={{ padding: 20 }}>Loading…</Text>;
 
   /* ---------------------------------------------------
-      SAVE MAIN SETTINGS
+        SAVE MAIN SETTINGS
   --------------------------------------------------- */
   const saveSettings = async () => {
-    const threshold = Number(thresholdInput);
-    const reward = Number(rewardInput);
-
-    if (isNaN(threshold) || isNaN(reward)) {
-      return Alert.alert("Error", "Threshold & Reward must be valid numbers.");
-    }
-
     const updated = {
       ...config,
-      spendThreshold: threshold,
-      rewardAmount: reward,
+      defaultRegion,
+      defaultShippingPrice: Number(defaultShippingPrice),
+      freeShippingThreshold: Number(freeShippingThreshold),
     };
 
     try {
       await updateDoc(doc(db, "settings", "cartConfig"), updated);
-      Alert.alert("Saved", "Settings updated!");
+      Alert.alert("Saved", "Main settings updated!");
     } catch {
-      Alert.alert("Error", "Could not save settings.");
+      Alert.alert("Error", "Could not save.");
     }
   };
 
   /* ---------------------------------------------------
-      SELECT EXISTING PROMO
+        SELECT PROMO TO EDIT
   --------------------------------------------------- */
   const selectExistingPromo = (code: string) => {
     const promo = config.activePromos[code];
@@ -93,17 +93,16 @@ export default function CartSettingsScreen() {
     setPromoValue(
       promo.type === "PERCENT" ? String(promo.percent) : String(promo.amount)
     );
-
     setMaxUserInput(String(promo.maxUsagePerUser ?? ""));
     setMaxTotalInput(String(promo.maxTotalUses ?? ""));
   };
 
   /* ---------------------------------------------------
-      ADD / UPDATE PROMO
+        SAVE PROMO
   --------------------------------------------------- */
   const savePromo = async () => {
     if (!promoCode || !promoValue) {
-      return Alert.alert("Error", "Fill promo fields.");
+      return Alert.alert("Error", "Fill all promo fields.");
     }
 
     const updatedPromos = {
@@ -116,7 +115,7 @@ export default function CartSettingsScreen() {
         maxUsagePerUser: Number(maxUserInput) || null,
         maxTotalUses: Number(maxTotalInput) || null,
         currentUses: selectedPromo
-          ? config.activePromos[promoCode].currentUses ?? 0
+          ? (config.activePromos[promoCode].currentUses ?? 0)
           : 0,
       },
     };
@@ -144,7 +143,7 @@ export default function CartSettingsScreen() {
   };
 
   /* ---------------------------------------------------
-      DELETE PROMO
+        DELETE PROMO
   --------------------------------------------------- */
   const deletePromo = async (code: string) => {
     const updated = { ...config.activePromos };
@@ -152,57 +151,44 @@ export default function CartSettingsScreen() {
 
     const newConfig = { ...config, activePromos: updated };
 
-    try {
-      await updateDoc(doc(db, "settings", "cartConfig"), newConfig);
-    } catch {
-      Alert.alert("Error", "Could not delete promo.");
-    }
+    await updateDoc(doc(db, "settings", "cartConfig"), newConfig);
 
     setConfig(newConfig);
     if (selectedPromo === code) resetPromoForm();
   };
 
   /* ---------------------------------------------------
-      UI
+        UI
   --------------------------------------------------- */
   return (
     <ScrollView style={styles.container}>
-      <Text style={styles.title}>Cart Settings</Text>
+      <Text style={styles.title}>Cart & Shipping Settings</Text>
 
-      {/* Spend Threshold */}
-      <Text style={styles.label}>Spend Threshold ($)</Text>
+      {/* REGION */}
+      <Text style={styles.label}>Default Region</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="e.g. KY"
+        value={defaultRegion}
+        onChangeText={setDefaultRegion}
+      />
+
+      {/* DEFAULT SHIPPING PRICE */}
+      <Text style={styles.label}>Default Shipping Price ($)</Text>
       <TextInput
         style={styles.input}
         keyboardType="numeric"
-        value={thresholdInput}
-        onChangeText={setThresholdInput}
+        value={defaultShippingPrice}
+        onChangeText={setDefaultShippingPrice}
       />
 
-      {/* Reward */}
-      <Text style={styles.label}>Reward Amount ($)</Text>
+      {/* FREE SHIPPING */}
+      <Text style={styles.label}>Free Shipping Threshold ($)</Text>
       <TextInput
         style={styles.input}
         keyboardType="numeric"
-        value={rewardInput}
-        onChangeText={setRewardInput}
-      />
-
-      {/* Promo Text */}
-      <Text style={styles.label}>Promo Text</Text>
-      <TextInput
-        style={[styles.input, styles.textArea]}
-        multiline
-        value={config.promoText}
-        onChangeText={(v) => setConfig({ ...config, promoText: v })}
-      />
-
-      {/* Unlocked Text */}
-      <Text style={styles.label}>Unlocked Text</Text>
-      <TextInput
-        style={[styles.input, styles.textArea]}
-        multiline
-        value={config.unlockedText}
-        onChangeText={(v) => setConfig({ ...config, unlockedText: v })}
+        value={freeShippingThreshold}
+        onChangeText={setFreeShippingThreshold}
       />
 
       <TouchableOpacity style={styles.saveBtn} onPress={saveSettings}>
@@ -212,11 +198,7 @@ export default function CartSettingsScreen() {
       {/* PROMO LIST */}
       <Text style={styles.section}>Promo Codes</Text>
 
-      {Object.keys(config.activePromos).length === 0 && (
-        <Text style={{ color: "#777", marginTop: 10 }}>No promo codes yet.</Text>
-      )}
-
-      {Object.entries(config.activePromos).map(([code, promo]: any) => (
+      {Object.keys(config.activePromos).map((code) => (
         <TouchableOpacity
           key={code}
           style={[
@@ -227,13 +209,9 @@ export default function CartSettingsScreen() {
         >
           <Text style={styles.promoLabel}>
             {code} —{" "}
-            {promo.type === "PERCENT"
-              ? `${promo.percent}%`
-              : `$${promo.amount} OFF`}
-            {"\n"}
-            <Text style={{ fontSize: 12, color: "#777" }}>
-              Used: {promo.currentUses ?? 0} / {promo.maxTotalUses ?? "∞"}
-            </Text>
+            {config.activePromos[code].type === "PERCENT"
+              ? `${config.activePromos[code].percent}%`
+              : `$${config.activePromos[code].amount} OFF`}
           </Text>
 
           <TouchableOpacity onPress={() => deletePromo(code)}>
@@ -242,7 +220,7 @@ export default function CartSettingsScreen() {
         </TouchableOpacity>
       ))}
 
-      {/* ADD / EDIT PROMO */}
+      {/* CREATE/EDIT PROMO */}
       <Text style={styles.section}>
         {selectedPromo ? "Edit Promo" : "Add New Promo"}
       </Text>
@@ -254,7 +232,6 @@ export default function CartSettingsScreen() {
         onChangeText={setPromoCode}
       />
 
-      <Text style={styles.subLabel}>Promo Type</Text>
       <View style={styles.row}>
         <TouchableOpacity
           style={[styles.typeBtn, promoType === "PERCENT" && styles.selected]}
@@ -267,33 +244,29 @@ export default function CartSettingsScreen() {
           style={[styles.typeBtn, promoType === "FIXED" && styles.selected]}
           onPress={() => setPromoType("FIXED")}
         >
-          <Text>Fixed</Text>
+          <Text>Fixed Amount</Text>
         </TouchableOpacity>
       </View>
 
       <TextInput
         style={styles.input}
-        placeholder={promoType === "PERCENT" ? "10%" : "5$ OFF"}
         keyboardType="numeric"
+        placeholder={promoType === "PERCENT" ? "10%" : "5$ OFF"}
         value={promoValue}
         onChangeText={setPromoValue}
       />
 
-      {/* MAX USAGE PER USER */}
       <Text style={styles.subLabel}>Max Usage Per User</Text>
       <TextInput
         style={styles.input}
-        placeholder="e.g. 1"
         keyboardType="numeric"
         value={maxUserInput}
         onChangeText={setMaxUserInput}
       />
 
-      {/* MAX TOTAL USES */}
-      <Text style={styles.subLabel}>Max Total Uses (Store-wide)</Text>
+      <Text style={styles.subLabel}>Max Total Uses</Text>
       <TextInput
         style={styles.input}
-        placeholder="e.g. 100"
         keyboardType="numeric"
         value={maxTotalInput}
         onChangeText={setMaxTotalInput}
@@ -316,9 +289,7 @@ export default function CartSettingsScreen() {
   );
 }
 
-/* ---------------------------------------------------
-      STYLES
---------------------------------------------------- */
+/* STYLES */
 const styles = StyleSheet.create({
   container: { padding: 20, backgroundColor: "white" },
   title: { fontSize: 26, fontWeight: "bold", marginBottom: 20 },
@@ -331,7 +302,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginTop: 6,
   },
-  textArea: { height: 90, textAlignVertical: "top" },
   saveBtn: {
     backgroundColor: "#27ae60",
     padding: 14,
@@ -363,10 +333,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
   },
-  promoSelected: {
-    backgroundColor: "#e8f7ff",
-    borderColor: "#3ca0e0",
-  },
+  promoSelected: { backgroundColor: "#e8f7ff", borderColor: "#3ca0e0" },
   promoLabel: { fontWeight: "700" },
   row: { flexDirection: "row", marginTop: 6 },
   typeBtn: {

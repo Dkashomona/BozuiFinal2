@@ -1,10 +1,14 @@
-import { View, Text, StyleSheet, TextInput, TouchableOpacity } from "react-native";
-import { useState, useMemo, useEffect } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+} from "react-native";
+import { useState, useEffect, useMemo } from "react";
 import { applyDiscounts } from "../../utils/discountEngine";
 import { db } from "../../services/firebase";
-import { doc, onSnapshot } from "firebase/firestore";
-import type { DeliveryKey } from "../../services/deliveryService";
-import { DELIVERY_OPTIONS } from "../../services/deliveryService";
+import { doc, onSnapshot, getDocs, collection } from "firebase/firestore";
 import { calculateTax } from "../../services/taxService";
 
 type CartItem = {
@@ -12,57 +16,68 @@ type CartItem = {
   name: string;
   price: number;
   qty: number;
+  weight?: number;
 };
 
-type Campaign = {
-  id: string;
-  title: string;
-  type: string;
-  productIds?: string[];
-  config?: any;
-};
-
-type Props = {
+export interface CartSummaryProps {
   items: CartItem[];
-  campaigns: Campaign[];
+  campaigns: any[];
   userData: any;
-  region: string;
-  delivery: DeliveryKey;   // strict union type
-};
+  zip?: string;
+}
 
 export default function CartSummary({
   items,
   campaigns,
   userData,
-  region,
-  delivery,
-}: Props) {
+  zip,
+}: CartSummaryProps) {
+  /* ----------------------------- STATE ----------------------------- */
+  const [config, setConfig] = useState<any>(null);
+  const [zones, setZones] = useState<any[]>([]);
+  const [shipping, setShipping] = useState<number>(0);
   const [promoInput, setPromoInput] = useState("");
   const [coupon, setCoupon] = useState<any>(null);
-  const [config, setConfig] = useState<any>(null);
 
-  /** Load admin config */
+  /* -------------------- LOAD CART CONFIG -------------------- */
   useEffect(() => {
-    const ref = doc(db, "settings", "cartConfig");
-    return onSnapshot(ref, (snap) => {
+    return onSnapshot(doc(db, "settings", "cartConfig"), (snap) => {
       if (snap.exists()) setConfig(snap.data());
     });
   }, []);
 
-  const subtotal = items.reduce(
-    (sum, item) => sum + Number(item.price) * item.qty,
-    0
+  /* -------------------- LOAD SHIPPING ZONES -------------------- */
+  useEffect(() => {
+    async function loadZones() {
+      const snap = await getDocs(collection(db, "shipping_zones"));
+      const arr: any[] = [];
+      snap.forEach((d) => arr.push({ id: d.id, ...d.data() }));
+      setZones(arr);
+    }
+    loadZones();
+  }, []);
+
+  /* -------------------- ALWAYS-CALL HOOKS -------------------- */
+
+  // Subtotal
+  const subtotal = useMemo(
+    () => items.reduce((sum, i) => sum + Number(i.price) * Number(i.qty), 0),
+    [items]
   );
 
-  /** Total discount + total price */
-  const { totalPrice, totalDiscount } = useMemo(() => {
-    if (!config) return { totalPrice: subtotal, totalDiscount: 0 };
+  // Weight
+  const totalWeight = useMemo(
+    () => items.reduce((w, i) => w + (i.weight ?? 0) * i.qty, 0),
+    [items]
+  );
 
-    let finalTotal = 0;
-    let finalDiscount = 0;
+  // Discounts
+  const { totalPrice, totalDiscount } = useMemo(() => {
+    let final = 0;
+    let saved = 0;
 
     for (const item of items) {
-      const discount = applyDiscounts(
+      const d = applyDiscounts(
         item,
         campaigns,
         userData,
@@ -71,99 +86,102 @@ export default function CartSummary({
         subtotal
       );
 
-      const itemOriginal = discount.originalPrice * item.qty;
-      const itemFinal = discount.price * item.qty;
+      const original = d.originalPrice * item.qty;
+      const newPrice = d.price * item.qty;
 
-      finalTotal += itemFinal;
-      finalDiscount += itemOriginal - itemFinal;
+      final += newPrice;
+      saved += original - newPrice;
     }
 
-    return { totalPrice: finalTotal, totalDiscount: finalDiscount };
-  }, [items, campaigns, userData, coupon, subtotal, config]);
+    return { totalPrice: final, totalDiscount: saved };
+  }, [items, campaigns, userData, coupon, subtotal]);
 
+  // Tax placeholder (safe even if config is null)
+  const tax = useMemo(() => {
+    if (!config) return 0;
+    return calculateTax(totalPrice, config.defaultRegion) ?? 0;
+  }, [config, totalPrice]);
+
+  // Shipping logic
+  useEffect(() => {
+    if (!config) return;
+    if (!zip || zip.length < 4) {
+      setShipping(Number(config.defaultShippingPrice || 0));
+      return;
+    }
+
+    const prefix = zip.substring(0, 2);
+    const zone = zones.find(
+      (z) =>
+        z.countries.includes(prefix) &&
+        totalWeight >= (z.minWeight || 0) &&
+        totalWeight <= (z.maxWeight || 999999)
+    );
+
+    if (subtotal >= Number(config.freeShippingThreshold || 999999)) {
+      setShipping(0);
+    } else {
+      setShipping(Number(zone?.price ?? config.defaultShippingPrice ?? 0));
+    }
+  }, [zip, zones, totalWeight, subtotal, config]);
+
+  // Grand Total (safe)
+  const grandTotal = useMemo(() => {
+    return (totalPrice || 0) + (tax || 0) + Number(shipping || 0);
+  }, [totalPrice, tax, shipping]);
+
+  /* -------------------- EARLY-UI RETURN (SAFE AFTER HOOKS) -------------------- */
   if (!config) {
     return (
       <View style={styles.box}>
-        <Text>Loading…</Text>
+        <Text>Loading cart configuration…</Text>
       </View>
     );
   }
 
-  /** Spend more logic */
-  const threshold = Number(config.spendThreshold) || 100;
-  const reward = Number(config.rewardAmount) || 15;
-  const missing = Math.max(0, threshold - subtotal);
-
-  const promoMsg =
-    config.promoText
-      ?.replace("{{missing}}", missing.toFixed(2))
-      ?.replace("{{reward}}", `${reward}`)
-      ?.replace("{{threshold}}", `${threshold}`)
-      ?.replace("{{subtotal}}", `${subtotal}`) ?? "";
-
-  const unlockedMsg =
-    config.unlockedText?.replace("{{reward}}", `${reward}`) ?? "";
-
-  /** Shipping */
-  const shipping = DELIVERY_OPTIONS[delivery].amount;
-
-  /** Tax */
-  const tax = calculateTax(totalPrice, region);
-
-  /** Promo application */
-  const promoMap = config.activePromos || {};
-
+  /* ----------------------------- RENDER UI ----------------------------- */
   const tryApplyPromo = () => {
-    const code = promoInput.trim();
-    const promo = promoMap[code];
+    const promo = config.activePromos?.[promoInput];
+    if (!promo) return alert("Invalid promo");
 
-    if (!promo) return alert("Invalid code");
-
-    const used = userData?.promoUsage?.[code] ?? 0;
+    const used = userData?.promoUsage?.[promoInput] ?? 0;
 
     if (promo.maxUsagePerUser && used >= promo.maxUsagePerUser)
-      return alert("You reached your usage limit.");
+      return alert("Usage limit reached.");
 
     if (promo.maxTotalUses && promo.currentUses >= promo.maxTotalUses)
-      return alert("This promo is finished.");
+      return alert("Promo expired.");
 
     setCoupon(promo);
-    alert("Promo Applied!");
+    alert("Promo applied!");
   };
-
-  /** GRAND TOTAL */
-  const grandTotal = totalPrice + tax + shipping;
 
   return (
     <View style={styles.box}>
-      <Text style={styles.label}>Subtotal: ${subtotal.toFixed(2)}</Text>
+      <Text style={styles.row}>Subtotal: ${subtotal.toFixed(2)}</Text>
 
       {totalDiscount > 0 && (
         <Text style={styles.saved}>
-          🎉 You saved ${totalDiscount.toFixed(2)}!
+          You saved ${totalDiscount.toFixed(2)} 🎉
         </Text>
       )}
 
-      {missing > 0 ? (
-        <Text style={styles.spendMore}>{promoMsg}</Text>
-      ) : (
-        <Text style={styles.unlocked}>{unlockedMsg}</Text>
-      )}
-
-      {/* Promo */}
       <View style={styles.promoRow}>
         <TextInput
-          value={promoInput}
-          onChangeText={setPromoInput}
           placeholder="Promo code"
           style={styles.input}
+          value={promoInput}
+          onChangeText={setPromoInput}
         />
         <TouchableOpacity style={styles.btn} onPress={tryApplyPromo}>
-          <Text style={{ color: "#fff" }}>Apply</Text>
+          <Text style={{ color: "#fff", fontWeight: "700" }}>Apply</Text>
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.row}>Shipping: ${shipping.toFixed(2)}</Text>
+      <Text style={styles.row}>
+        Shipping: {shipping === 0 ? "FREE" : `$${shipping.toFixed(2)}`}
+      </Text>
+
       <Text style={styles.row}>Tax: ${tax.toFixed(2)}</Text>
 
       <Text style={styles.total}>Total: ${grandTotal.toFixed(2)}</Text>
@@ -176,31 +194,23 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     padding: 16,
     borderRadius: 12,
-    marginTop: 12,
     marginBottom: 20,
   },
-  label: { fontSize: 16, fontWeight: "600" },
-  saved: { color: "#27ae60", marginTop: 4, fontWeight: "600" },
-  spendMore: { color: "#e67e22", marginTop: 6 },
-  unlocked: { color: "#27ae60", marginTop: 6, fontWeight: "600" },
-  row: { marginTop: 8, fontSize: 15 },
+  row: { fontSize: 16, marginTop: 6 },
+  saved: { color: "#27ae60", fontWeight: "700", marginTop: 4 },
   promoRow: { flexDirection: "row", marginTop: 12, gap: 8 },
   input: {
     flex: 1,
     borderWidth: 1,
     borderColor: "#ddd",
     borderRadius: 8,
-    padding: 8,
+    padding: 10,
   },
   btn: {
     backgroundColor: "#e67e22",
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     justifyContent: "center",
     borderRadius: 8,
   },
-  total: {
-    fontSize: 22,
-    fontWeight: "700",
-    marginTop: 16,
-  },
+  total: { fontSize: 22, fontWeight: "800", marginTop: 16 },
 });
