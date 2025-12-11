@@ -1,4 +1,3 @@
-/*
 import { router } from "expo-router";
 import {
   StyleSheet,
@@ -25,14 +24,14 @@ export default function HomeScreen() {
   const isWeb = Platform.OS === "web";
   useWindowDimensions();
 
-  /* ---------------- FILTER STATES ---------------- 
+  /* ---------------- FILTER STATES ---------------- */
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All");
   const [subcategory, setSubcategory] = useState("All");
   const [min, setMin] = useState<number | null>(null);
   const [max, setMax] = useState<number | null>(null);
 
-  /* ---------------- FILTER CALLBACKS ---------------- 
+  /* ---------------- FILTER CALLBACKS ---------------- */
   const handleSearch = useCallback((v: string) => setQuery(v), []);
   const handleCategory = useCallback((c: string) => {
     setCategory(c);
@@ -42,7 +41,7 @@ export default function HomeScreen() {
   const handleMin = useCallback((v: number) => setMin(v), []);
   const handleMax = useCallback((v: number) => setMax(v), []);
 
-  /* ---------------- LOADING ---------------- 
+  /* ---------------- LOADING ---------------- */
   if (loading) {
     return (
       <View style={styles.center}>
@@ -51,47 +50,94 @@ export default function HomeScreen() {
     );
   }
 
-  /* ---------------- MAIN UI ---------------- 
+  /* ---------------- MAIN UI ---------------- */
   return (
     <View style={styles.page}>
-      {/* HEADER BAR *
-      <View style={styles.header}>
-        <View style={{ flexDirection: "row", alignItems: "center" }}>
-          <Ionicons
-            name="location-outline"
-            size={20}
-            color="white"
-            style={{ marginRight: 8 }}
+      {/* SEARCH BAR — LOWERED on Mobile */}
+      {Platform.OS === "web" ? (
+        <SearchBar
+          onSearch={handleSearch}
+          onCategory={handleCategory}
+          onSubcategory={handleSubcategory}
+          onMin={handleMin}
+          onMax={handleMax}
+        />
+      ) : (
+        <View style={styles.mobileSearchWrapper}>
+          <SearchBar
+            onSearch={handleSearch}
+            onCategory={handleCategory}
+            onSubcategory={handleSubcategory}
+            onMin={handleMin}
+            onMax={handleMax}
           />
-
-          <View>
-            <Text style={styles.headerHello}>Hello, {name}</Text>
-
-            {currentUser ? (
-              <Text style={styles.headerSub}>
-                Delivering to: {currentUser.address?.city || "Set your address"}
-              </Text>
-            ) : (
-              <TouchableOpacity onPress={() => router.push("/login")}>
-                <Text style={styles.headerLoginLink}>Sign in for delivery</Text>
-              </TouchableOpacity>
-            )}
-          </View>
         </View>
+      )}
 
-        <CartIcon />
-      </View>
+      {/* --------------------------------------
+           DELIVER TO + SIGN IN under search (Mobile Only)
+         -------------------------------------- */}
+      {Platform.OS !== "web" && (
+        <View style={styles.mobileInfoRow}>
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <Ionicons
+              name="location"
+              size={18}
+              color="#fff"
+              style={{ marginRight: 4 }}
+            />
+            <Text style={styles.mobileDeliverText}>
+              Deliver to{" "}
+              {currentUser
+                ? currentUser.address?.city || "Set your address"
+                : "Sign in"}
+            </Text>
+          </View>
 
-      {/* SEARCH BAR *
-      <SearchBar
-        onSearch={handleSearch}
-        onCategory={handleCategory}
-        onSubcategory={handleSubcategory}
-        onMin={handleMin}
-        onMax={handleMax}
-      />
+          {!currentUser && (
+            <TouchableOpacity onPress={() => router.push("/login")}>
+              <Text style={styles.mobileSignIn}>Sign in ›</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
 
-      {/* ADMIN BUTTON *
+      {/* --------------------------------------
+           DESKTOP / WEB HEADER
+         -------------------------------------- */}
+      {isWeb && (
+        <View style={styles.header}>
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <Ionicons
+              name="location-outline"
+              size={20}
+              color="white"
+              style={{ marginRight: 8 }}
+            />
+
+            <View>
+              <Text style={styles.headerHello}>Hello, {name}</Text>
+
+              {currentUser ? (
+                <Text style={styles.headerSub}>
+                  Delivering to:{" "}
+                  {currentUser.address?.city || "Set your address"}
+                </Text>
+              ) : (
+                <TouchableOpacity onPress={() => router.push("/login")}>
+                  <Text style={styles.headerLoginLink}>
+                    Sign in for delivery
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+
+          <CartIcon />
+        </View>
+      )}
+
+      {/* ADMIN BUTTON */}
       {role === "admin" && (
         <TouchableOpacity
           style={styles.adminBtn}
@@ -101,7 +147,7 @@ export default function HomeScreen() {
         </TouchableOpacity>
       )}
 
-      {/* ---------------- WEB LAYOUT ---------------- *
+      {/* ---------------- WEB LAYOUT ---------------- */}
       {isWeb ? (
         <ScrollView contentContainerStyle={{ paddingBottom: 100 }}>
           <CampaignSlider
@@ -122,7 +168,6 @@ export default function HomeScreen() {
           />
         </ScrollView>
       ) : (
-        /* ---------------- MOBILE LAYOUT ---------------- 
         <>
           <CampaignSlider
             query={query}
@@ -145,13 +190,43 @@ export default function HomeScreen() {
   );
 }
 
+/* ---------------- STYLES ---------------- */
+
 const styles = StyleSheet.create({
   page: {
     flex: 1,
     backgroundColor: "#f5f5f5",
   },
 
-  /* HEADER 
+  /* SEARCH WRAPPER ON MOBILE (LOWERED) */
+  mobileSearchWrapper: {
+    marginTop: Platform.OS === "ios" ? 40 : 25, // LOWERED SEARCH BAR
+    paddingHorizontal: 10,
+  },
+
+  /* MOBILE: Deliver to + Sign-in */
+  mobileInfoRow: {
+    backgroundColor: "rgba(249, 22, 5, 1)",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+
+  mobileDeliverText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+
+  mobileSignIn: {
+    color: "#FFD814",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+  /* WEB HEADER */
   header: {
     backgroundColor: "#0f1111",
     paddingVertical: 14,
@@ -178,14 +253,7 @@ const styles = StyleSheet.create({
     textDecorationLine: "underline",
   },
 
-  /* PAGE TITLES 
-  section: {
-    fontSize: 20,
-    fontWeight: "700",
-    margin: 16,
-  },
-
-  /* ADMIN BUTTON
+  /* ADMIN BUTTON */
   adminBtn: {
     alignSelf: "flex-end",
     backgroundColor: "#FFD814",
@@ -201,73 +269,10 @@ const styles = StyleSheet.create({
     color: "#111",
   },
 
-  /* LOADING  
+  /* LOADING CENTER */
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
   },
 });
-*/
-import { Tabs } from "expo-router";
-import { Text, Platform } from "react-native";
-
-export default function TabLayout() {
-  const isMobile = Platform.OS === "ios" || Platform.OS === "android";
-
-  return (
-    <Tabs
-      screenOptions={{
-        headerShown: false, // 🔥 Remove all default headers (fix for Home showing)
-        tabBarStyle: {
-          height: isMobile ? 44 : 65,
-          paddingBottom: isMobile ? 4 : 10,
-          paddingTop: isMobile ? 4 : 10,
-        },
-        tabBarLabelStyle: {
-          fontSize: 11,
-        },
-      }}
-    >
-      {/* HOME TAB */}
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: "Home",
-          headerShown: false, // 🔥 Ensure header is removed for Home
-          tabBarIcon: () => <Text style={{ fontSize: 20 }}>🏠</Text>,
-        }}
-      />
-
-      {/* CART TAB */}
-      <Tabs.Screen
-        name="cart"
-        options={{
-          title: "Cart",
-          headerShown: false,
-          tabBarIcon: () => <Text style={{ fontSize: 20 }}>🛒</Text>,
-        }}
-      />
-
-      {/* WISHLIST TAB */}
-      <Tabs.Screen
-        name="wishlist"
-        options={{
-          title: "Wishlist",
-          headerShown: false,
-          tabBarIcon: () => <Text style={{ fontSize: 20 }}>💛</Text>,
-        }}
-      />
-
-      {/* PROFILE TAB */}
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: "Profile",
-          headerShown: false,
-          tabBarIcon: () => <Text style={{ fontSize: 20 }}>👤</Text>,
-        }}
-      />
-    </Tabs>
-  );
-}

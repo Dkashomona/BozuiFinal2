@@ -75,27 +75,20 @@ export default function SearchBar({
     [onSearch]
   );
 
-  /* 
-   CATEGORY FIXED — send ID to parent, but keep name for display
-  */
   const handleCategory = useCallback(
     (id: string, name: string) => {
       setSelectedCategoryId(id);
       setSelectedCategoryName(name);
       setSelectedSub("All");
-
-      onCategory?.(id); // ✔ REAL FIX
+      onCategory?.(id);
     },
     [onCategory]
   );
 
-  /* 
-    SUBCATEGORY FIXED — send ID to parent
-  */
   const handleSubcategory = useCallback(
     (id: string, name: string) => {
       setSelectedSub(name);
-      onSubcategory?.(id); // ✔ REAL FIX
+      onSubcategory?.(id);
     },
     [onSubcategory]
   );
@@ -118,8 +111,8 @@ export default function SearchBar({
     onSubcategory?.("All");
     onMin?.(null);
     onMax?.(null);
-    onSortChange?.("none");
     onClear?.();
+    onSortChange?.("none");
 
     setOpenFilters(false);
 
@@ -139,7 +132,7 @@ export default function SearchBar({
     animatedHeight,
   ]);
 
-  /* ---------- PANEL TOGGLE ---------- */
+  /* ---------- FILTER PANEL TOGGLE ---------- */
   const toggleFilters = useCallback(() => {
     const toValue = openFilters
       ? 0
@@ -166,7 +159,7 @@ export default function SearchBar({
     loadCategories();
   }, []);
 
-  /* ---------- LOAD SUBCATEGORIES BY categoryId ---------- */
+  /* ---------- LOAD SUBCATEGORIES ---------- */
   useEffect(() => {
     async function loadSub() {
       if (selectedCategoryId === "All") {
@@ -191,7 +184,7 @@ export default function SearchBar({
     loadSub();
   }, [selectedCategoryId, handleSubcategory]);
 
-  /* ---------- KEYBOARD SAFE PANEL ---------- */
+  /* ---------- KEYBOARD HANDLING ---------- */
   useEffect(() => {
     const show = Keyboard.addListener("keyboardDidShow", (e) => {
       Animated.timing(animatedHeight, {
@@ -221,7 +214,17 @@ export default function SearchBar({
 
   return (
     <View
-      style={[styles.wrapper, { backgroundColor: isDark ? "#111" : "#232f3e" }]}
+      style={[
+        styles.wrapper,
+        {
+          backgroundColor:
+            Platform.OS === "web"
+              ? isDark
+                ? "#111"
+                : "#232f3e"
+              : "transparent", // << FIXED: No black on mobile
+        },
+      ]}
     >
       {/* SEARCH BAR */}
       <View style={[styles.searchRow, { backgroundColor: theme.bg }]}>
