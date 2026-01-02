@@ -1,116 +1,62 @@
-/*
 import { Tabs } from "expo-router";
-import { Text, Platform } from "react-native";
+import { Platform } from "react-native";
+import { Icon } from "@/src/components/icons/Icon";
+
+const ICON_SIZE = Platform.OS === "web" ? 22 : 20;
 
 export default function TabLayout() {
-  const isMobile = Platform.OS === "ios" || Platform.OS === "android";
-
   return (
-    <Tabs
-      screenOptions={{
-        tabBarStyle: {
-          height: isMobile ? 44 : 65,
-          paddingBottom: isMobile ? 4 : 10,
-          paddingTop: isMobile ? 4 : 10,
-        },
-        tabBarLabelStyle: {
-          fontSize: 11,
-        },
-      }}
-    >
+    <Tabs screenOptions={{ headerShown: false }}>
       <Tabs.Screen
         name="index"
         options={{
           title: "Home",
-          tabBarIcon: () => <Text style={{ fontSize: 20 }}>🏠</Text>,
+          tabBarIcon: ({ color, focused }) => (
+            <Icon
+              name={focused ? "home" : "home-outline"}
+              size={ICON_SIZE}
+              color={color}
+            />
+          ),
         }}
       />
-
       <Tabs.Screen
         name="cart"
         options={{
           title: "Cart",
-          tabBarIcon: () => <Text style={{ fontSize: 20 }}>🛒</Text>,
+          tabBarIcon: ({ color, focused }) => (
+            <Icon
+              name={focused ? "cart" : "cart-outline"}
+              size={ICON_SIZE}
+              color={color}
+            />
+          ),
         }}
       />
-
       <Tabs.Screen
         name="wishlist"
         options={{
           title: "Wishlist",
-          tabBarIcon: () => <Text style={{ fontSize: 20 }}>💛</Text>,
+          tabBarIcon: ({ color, focused }) => (
+            <Icon
+              name={focused ? "heart" : "heart-outline"}
+              size={ICON_SIZE}
+              color={color}
+            />
+          ),
         }}
       />
-
       <Tabs.Screen
         name="profile"
         options={{
           title: "Profile",
-          tabBarIcon: () => <Text style={{ fontSize: 20 }}>👤</Text>,
-        }}
-      />
-    </Tabs>
-  );
-}
-*/
-
-import { Tabs } from "expo-router";
-import { Text, Platform } from "react-native";
-
-export default function TabLayout() {
-  const isMobile = Platform.OS === "ios" || Platform.OS === "android";
-
-  return (
-    <Tabs
-      screenOptions={{
-        headerShown: false, // 🔥 Remove all default headers (fix for Home showing)
-        tabBarStyle: {
-          height: isMobile ? 60 : 65,
-          paddingBottom: isMobile ? 4 : 10,
-          paddingTop: isMobile ? 4 : 10,
-        },
-        tabBarLabelStyle: {
-          fontSize: 11,
-        },
-      }}
-    >
-      {/* HOME TAB */}
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: "Home",
-          headerShown: false, // 🔥 Ensure header is removed for Home
-          tabBarIcon: () => <Text style={{ fontSize: 20 }}>🏠</Text>,
-        }}
-      />
-
-      {/* CART TAB */}
-      <Tabs.Screen
-        name="cart"
-        options={{
-          title: "Cart",
-          headerShown: false,
-          tabBarIcon: () => <Text style={{ fontSize: 20 }}>🛒</Text>,
-        }}
-      />
-
-      {/* WISHLIST TAB */}
-      <Tabs.Screen
-        name="wishlist"
-        options={{
-          title: "Wishlist",
-          headerShown: false,
-          tabBarIcon: () => <Text style={{ fontSize: 20 }}>💛</Text>,
-        }}
-      />
-
-      {/* PROFILE TAB */}
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: "Profile",
-          headerShown: false,
-          tabBarIcon: () => <Text style={{ fontSize: 20 }}>👤</Text>,
+          tabBarIcon: ({ color, focused }) => (
+            <Icon
+              name={focused ? "person" : "person-outline"}
+              size={ICON_SIZE}
+              color={color}
+            />
+          ),
         }}
       />
     </Tabs>

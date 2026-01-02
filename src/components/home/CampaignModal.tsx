@@ -7,186 +7,312 @@ import {
   ScrollView,
   TouchableOpacity,
   StyleSheet,
+  Pressable,
+  useWindowDimensions,
+  Platform,
 } from "react-native";
+import { router } from "expo-router";
 import { Campaign } from "../../models/Campaign";
 import ProductQuickViewModal from "./ProductQuickViewModal";
+
+type Product = {
+  id: string;
+  name: string;
+  price?: number;
+  images?: string[];
+  [key: string]: any;
+};
+
+type Props = {
+  visible: boolean;
+  campaign: Campaign | null;
+  products: Product[];
+  onClose: () => void;
+};
 
 export default function CampaignModal({
   visible,
   campaign,
   products,
   onClose,
-}: {
-  visible: boolean;
-  campaign: Campaign | null;
-  products: any[];
-  onClose: () => void;
-}) {
-
-  const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
+}: Props) {
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const { width } = useWindowDimensions();
 
   if (!campaign) return null;
 
-  return (
-    <Modal animationType="fade" visible={visible} transparent>
-      {/* Dim background */}
-      <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
+  const isLarge = width > 600;
+  const BANNER_HEIGHT = isLarge ? 320 : 220;
 
-      <View style={styles.modalContainer}>
-        <ScrollView contentContainerStyle={{ paddingBottom: 30 }}>
-          
-          {/* Banner */}
-          {campaign.bannerImage ? (
+  return (
+    <Modal visible={visible} transparent animationType="fade">
+      {/* BACKDROP */}
+      <Pressable style={styles.backdrop} onPress={onClose} />
+
+      {/* MODAL */}
+      <View style={styles.container}>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          {/* ================= BANNER ================= */}
+          <View style={[styles.bannerWrap, { height: BANNER_HEIGHT }]}>
+            {/* BACKGROUND FILL (premium, no crop) */}
             <Image
               source={{ uri: campaign.bannerImage }}
-              style={styles.banner}
+              style={styles.bannerBackground}
+              resizeMode="cover"
+              blurRadius={Platform.OS === "web" ? 0 : 14}
             />
-          ) : (
-            <View style={[styles.banner, styles.bannerPlaceholder]}>
-              <Text>No Banner</Text>
+
+            {/* MAIN IMAGE (NO CROPPING) */}
+            <Image
+              source={{ uri: campaign.bannerImage }}
+              style={styles.bannerContain}
+              resizeMode="contain"
+            />
+
+            {/* GRADIENT */}
+            <View style={styles.bannerGradient} />
+
+            {/* TEXT */}
+            <View style={styles.bannerTextWrap}>
+              <Text style={styles.campaignTitle}>{campaign.title}</Text>
+              {!!campaign.subtitle && (
+                <Text style={styles.campaignSubtitle}>{campaign.subtitle}</Text>
+              )}
             </View>
-          )}
+          </View>
 
-          <Text style={styles.title}>{campaign.title}</Text>
+          {/* ================= PRODUCTS ================= */}
+          <Text style={styles.sectionTitle}>Featured Products</Text>
 
-          {campaign.subtitle ? (
-            <Text style={styles.subtitle}>{campaign.subtitle}</Text>
-          ) : null}
+          <View
+            style={[
+              styles.grid,
+              { gridTemplateColumns: isLarge ? "1fr 1fr" : "1fr" },
+            ]}
+          >
+            {products.map((p) => {
+              const img =
+                p.images?.[0] ??
+                "https://via.placeholder.com/300x300?text=No+Image";
 
-          <Text style={styles.sectionTitle}>Products in this campaign</Text>
-
-          {products.length === 0 && (
-            <Text style={{ color: "#777" }}>No products in this campaign.</Text>
-          )}
-
-          {products.map((p) => {
-            const img = p.images?.[0] || null;
-
-            return (
-              <TouchableOpacity
-                key={p.id}
-                onPress={() => setSelectedProduct(p)}
-                style={styles.productRow}
-              >
-                {img ? (
-                  <Image source={{ uri: img }} style={styles.productImage} />
-                ) : (
-                  <View style={styles.productImagePlaceholder}>
-                    <Text style={{ color: "#777", fontSize: 10 }}>No image</Text>
+              return (
+                <TouchableOpacity
+                  key={p.id}
+                  style={styles.card}
+                  activeOpacity={0.85}
+                  onPress={() => setSelectedProduct(p)}
+                >
+                  {/* IMAGE */}
+                  <View style={styles.cardImageWrap}>
+                    <Image
+                      source={{ uri: img }}
+                      style={styles.cardImage}
+                      resizeMode="contain"
+                    />
                   </View>
-                )}
 
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.productName}>{p.name}</Text>
-                  {"price" in p && (
-                    <Text style={styles.productPrice}>${p.price}</Text>
-                  )}
-                </View>
-              </TouchableOpacity>
-            );
-          })}
+                  {/* DETAILS */}
+                  <View style={styles.cardBody}>
+                    <Text numberOfLines={1} style={styles.cardName}>
+                      {p.name}
+                    </Text>
+                    <Text style={styles.cardPrice}>${p.price}</Text>
+                  </View>
 
-          {/* Close button */}
+                  {/* VIEW */}
+                  <TouchableOpacity
+                    style={styles.cardViewBtn}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      router.push(`/product/${p.id}`);
+                      onClose();
+                    }}
+                  >
+                    <Text style={styles.cardViewText}>View</Text>
+                  </TouchableOpacity>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* CLOSE */}
           <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
-            <Text style={styles.closeText}>Close</Text>
+            <Text style={styles.closeBtnText}>Close</Text>
           </TouchableOpacity>
         </ScrollView>
 
-        {/* Quick View Modal */}
+        {/* QUICK VIEW */}
         <ProductQuickViewModal
           visible={!!selectedProduct}
           product={selectedProduct}
           onClose={() => setSelectedProduct(null)}
-          onViewFull={() =>
-            console.log("Open full product:", selectedProduct?.id)
-          }
+          onViewFull={() => {
+            if (selectedProduct) {
+              router.push(`/product/${selectedProduct.id}`);
+              setSelectedProduct(null);
+              onClose();
+            }
+          }}
         />
-
       </View>
     </Modal>
   );
 }
 
+/* =====================================================
+   STYLES
+===================================================== */
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: "rgba(0,0,0,0.55)",
   },
-  modalContainer: {
+
+  container: {
     position: "absolute",
-    top: "8%",
-    left: "5%",
-    right: "5%",
-    bottom: "5%",
-    backgroundColor: "white",
-    borderRadius: 16,
-    padding: 15,
+    top: "4%",
+    left: "3%",
+    right: "3%",
+    bottom: "4%",
+    backgroundColor: "#fff",
+    borderRadius: 18,
+    overflow: "hidden",
   },
-  banner: {
+
+  scrollContent: {
+    paddingBottom: 80,
+  },
+
+  /* ================= BANNER ================= */
+  bannerWrap: {
+    position: "relative",
+    backgroundColor: "#111",
+    overflow: "hidden",
+  },
+
+  bannerBackground: {
+    position: "absolute",
     width: "100%",
-    height: 180,
-    borderRadius: 12,
-    resizeMode: "cover",
+    height: "100%",
+    opacity: 0.35,
   },
-  bannerPlaceholder: {
-    backgroundColor: "#ddd",
-    justifyContent: "center",
-    alignItems: "center",
+
+  bannerContain: {
+    width: "100%",
+    height: "100%",
   },
-  title: {
-    marginTop: 10,
-    fontSize: 22,
-    fontWeight: "bold",
+
+  bannerGradient: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: "55%",
+    backgroundColor: "rgba(0,0,0,0.45)",
   },
-  subtitle: {
+
+  bannerTextWrap: {
+    position: "absolute",
+    bottom: 28,
+    left: 24,
+    right: 24,
+  },
+
+  campaignTitle: {
+    fontSize: 30,
+    fontWeight: "800",
+    color: "#fff",
+  },
+
+  campaignSubtitle: {
+    marginTop: 6,
     fontSize: 16,
-    color: "#666",
-    marginBottom: 10,
+    color: "#eee",
   },
+
+  /* ================= GRID ================= */
   sectionTitle: {
-    marginTop: 16,
-    marginBottom: 8,
-    fontWeight: "bold",
-    fontSize: 16,
+    fontSize: 20,
+    fontWeight: "700",
+    marginTop: 20,
+    marginBottom: 10,
+    paddingHorizontal: 16,
   },
-  productRow: {
-    flexDirection: "row",
-    marginBottom: 12,
+
+  grid: {
+    display: "grid",
+    gap: 16,
+    paddingHorizontal: 16,
+  } as any,
+
+  /* ================= CARD ================= */
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+    ...(Platform.OS === "web" && { cursor: "pointer" }),
+  },
+
+  cardImageWrap: {
+    width: "100%",
+    aspectRatio: 1,
+    backgroundColor: "#f6f6f6",
     alignItems: "center",
-    gap: 10,
-  },
-  productImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 8,
-    backgroundColor: "#eee",
-  },
-  productImagePlaceholder: {
-    width: 60,
-    height: 60,
-    borderRadius: 8,
-    backgroundColor: "#eee",
     justifyContent: "center",
+  },
+
+  cardImage: {
+    width: "88%",
+    height: "88%",
+  },
+
+  cardBody: {
+    padding: 12,
+  },
+
+  cardName: {
+    fontSize: 15,
+    fontWeight: "600",
+  },
+
+  cardPrice: {
+    marginTop: 6,
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#e67e22",
+  },
+
+  cardViewBtn: {
+    margin: 12,
+    backgroundColor: "#000",
+    paddingVertical: 8,
+    borderRadius: 8,
     alignItems: "center",
   },
-  productName: {
+
+  cardViewText: {
+    color: "#fff",
     fontSize: 14,
     fontWeight: "600",
   },
-  productPrice: {
-    fontSize: 14,
-    color: "#e67e22",
-    fontWeight: "bold",
-  },
+
   closeBtn: {
-    marginTop: 20,
-    padding: 12,
-    backgroundColor: "#333",
+    marginTop: 25,
+    padding: 14,
+    alignSelf: "center",
+    backgroundColor: "#222",
     borderRadius: 10,
+    width: "60%",
     alignItems: "center",
   },
-  closeText: {
-    color: "white",
-    fontWeight: "bold",
+
+  closeBtnText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 16,
   },
 });

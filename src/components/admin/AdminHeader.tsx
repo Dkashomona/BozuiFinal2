@@ -1,25 +1,35 @@
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+// src/components/admin/AdminHeader.tsx
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Platform,
+} from "react-native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
-export default function AdminHeader({
-  title,
-  backTo,
-}: {
+type Props = {
   title: string;
-  backTo: string;
-}) {
+};
+
+export default function AdminHeader({ title }: Props) {
+  // 🚫 NEVER render on native
+  if (Platform.OS !== "web") return null;
+
   return (
     <View style={styles.header}>
-      {/* Back Button */}
-      <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+      <TouchableOpacity
+        onPress={() => router.replace("/admin")}
+        style={styles.backBtn}
+      >
         <Ionicons name="chevron-back" size={26} color="white" />
       </TouchableOpacity>
 
-      {/* Title */}
-      <Text style={styles.title}>{title}</Text>
+      <Text style={styles.title} numberOfLines={1}>
+        {title}
+      </Text>
 
-      {/* Spacer to balance layout */}
       <View style={{ width: 26 }} />
     </View>
   );
@@ -34,16 +44,20 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    position: "sticky", // works on web
+    position: "sticky",
     top: 0,
-    zIndex: 999,
+    zIndex: 100,
   },
+
   backBtn: {
-    padding: 4,
+    padding: 6,
   },
+
   title: {
     color: "white",
     fontSize: 20,
     fontWeight: "700",
+    maxWidth: "70%",
+    textAlign: "center",
   },
 });

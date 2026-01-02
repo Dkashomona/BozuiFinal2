@@ -1,178 +1,269 @@
-/*
-import { router } from "expo-router";
-import { ScrollView, Text, TouchableOpacity, View } from "react-native";
-import { useAuth } from "../../src/store/authStore";
+import {
+  ScrollView,
+  Text,
+  View,
+  StyleSheet,
+  Platform,
+  Pressable,
+} from "react-native";
+import { router, type Href } from "expo-router";
+import { useState } from "react";
+import AdminHeader from "../../src/components/admin/AdminHeader";
 
-interface CardProps {
+/* --------------------------------------------------
+   ROLE (replace later with auth / Firestore)
+-------------------------------------------------- */
+type Role = "admin" | "staff" | "viewer";
+const role: Role = "admin";
+
+/* --------------------------------------------------
+   BADGE COUNTS (mock → Firestore later)
+-------------------------------------------------- */
+const badgeCounts = {
+  orders: 12,
+  reviews: 4,
+  notifications: 7,
+};
+
+/* --------------------------------------------------
+   DASHBOARD CARDS (ALL CONSIDERED)
+-------------------------------------------------- */
+const cards: {
   title: string;
   emoji: string;
-  route: Parameters<typeof router.push>[0];
-}
+  route: Href;
+  badge?: number;
+  roles?: Role[];
+}[] = [
+  {
+    title: "Orders",
+    emoji: "🛒",
+    route: "/admin/orders",
+    badge: badgeCounts.orders,
+  },
 
-export default function AdminDashboardHome() {
-  const { role } = useAuth();
-
-  function Card({ title, emoji, route }: CardProps) {
-    return (
-      <TouchableOpacity
-        onPress={() => router.push(route)}
-        style={{
-          backgroundColor: "white",
-          padding: 20,
-          borderRadius: 16,
-          width: "48%",
-          marginBottom: 15,
-          elevation: 2,
-        }}
-      >
-        <Text style={{ fontSize: 28 }}>{emoji}</Text>
-        <Text style={{ fontSize: 16, fontWeight: "bold", marginTop: 8 }}>
-          {title}
-        </Text>
-      </TouchableOpacity>
-    );
-  }
-
-  return (
-    <ScrollView style={{ padding: 20 }}>
-      <Text style={{ fontSize: 28, fontWeight: "bold" }}>
-        Admin Dashboard – {role}
-      </Text>
-
-      <View
-        style={{
-          flexDirection: "row",
-          justifyContent: "space-between",
-          flexWrap: "wrap",
-          marginTop: 30,
-        }}
-      >
-        <Card title="Add Product" emoji="➕" route="/admin/products/add-product" />
-        <Card title="Products" emoji="📦" route="/admin/products" />
-
-        <Card title="Create Category" emoji="📂" route="/admin/categories/add-category" />
-        <Card title="Categories" emoji="🗂" route="/admin/categories" />
-
-        <Card title="Add Subcategory" emoji="📁" route="/admin/subcategories/add-subcategory" />
-        <Card title="Subcategories" emoji="🧩" route="/admin/subcategories" />
-
-        <Card title="Create Campaign" emoji="🎯" route="/admin/campaigns/add-campaign" />
-        <Card title="Campaigns" emoji="🎬" route="/admin/campaigns" />
-        <Card title="Cart Settings" emoji="🛒" route="/admin/cart/cart-settings" />
-      
-      </View>
-    </ScrollView>
-  );
-}
-*/
-import { ScrollView, Text, TouchableOpacity, View } from "react-native";
-import { router, type Href } from "expo-router";
-
-const cards: { title: string; emoji: string; route: Href }[] = [
-  { title: "Orders", emoji: "🛒", route: "/admin/orders" },
-
-  { title: "Products List", emoji: "📦", route: "/admin/products" },
+  {
+    title: "Products List",
+    emoji: "📦",
+    route: "/admin/products",
+    roles: ["admin", "staff"],
+  },
   {
     title: "Add Product",
     emoji: "➕📦",
     route: "/admin/products/add-product",
+    roles: ["admin"],
   },
 
-  { title: "Categories List", emoji: "🗂️", route: "/admin/categories" },
+  {
+    title: "Categories List",
+    emoji: "🗂️",
+    route: "/admin/categories",
+    roles: ["admin", "staff"],
+  },
   {
     title: "Add Category",
     emoji: "➕🗂️",
     route: "/admin/categories/add-category",
+    roles: ["admin"],
   },
 
   {
     title: "Subcategories List",
     emoji: "🧩",
     route: "/admin/subcategories",
+    roles: ["admin", "staff"],
   },
   {
     title: "Add Subcategory",
     emoji: "➕🧩",
     route: "/admin/subcategories/add-subcategory",
+    roles: ["admin"],
   },
 
-  { title: "Campaigns", emoji: "🎯", route: "/admin/campaigns" },
+  {
+    title: "Campaigns",
+    emoji: "🎯",
+    route: "/admin/campaigns",
+    roles: ["admin"],
+  },
   {
     title: "Add Campaign",
     emoji: "➕🎯",
     route: "/admin/campaigns/add-campaign",
+    roles: ["admin"],
   },
 
-  { title: "Cart Settings", emoji: "⚙️", route: "/admin/cart/cart-settings" },
-
-  { title: "Inventory", emoji: "📊", route: "/admin/inventory" },
-
-  { title: "Customers", emoji: "👥", route: "/admin/customers" },
-
-  { title: "Analytics", emoji: "📈", route: "/admin/analytics" },
+  {
+    title: "Cart Settings",
+    emoji: "⚙️",
+    route: "/admin/cart/cart-settings",
+    roles: ["admin"],
+  },
+  {
+    title: "Inventory",
+    emoji: "📊",
+    route: "/admin/inventory",
+    roles: ["admin", "staff"],
+  },
+  {
+    title: "Customers",
+    emoji: "👥",
+    route: "/admin/customers",
+    roles: ["admin", "staff"],
+  },
+  {
+    title: "Analytics",
+    emoji: "📈",
+    route: "/admin/analytics",
+    roles: ["admin"],
+  },
 
   {
     title: "Shipping Zones",
     emoji: "🚚",
     route: "/admin/shipping-zones",
+    roles: ["admin"],
   },
-
-  { title: "Payouts", emoji: "💵", route: "/admin/payouts" },
+  { title: "Payouts", emoji: "💵", route: "/admin/payouts", roles: ["admin"] },
 
   {
     title: "Notifications",
     emoji: "🔔",
     route: "/admin/notifications",
+    badge: badgeCounts.notifications,
+    roles: ["admin", "staff"],
+  },
+
+  {
+    title: "Review Moderation",
+    emoji: "📝",
+    route: "/admin/reviews",
+    badge: badgeCounts.reviews,
+    roles: ["admin", "staff"],
   },
 ];
 
+/* --------------------------------------------------
+   CARD COMPONENT (PRESSABLE = TS SAFE)
+-------------------------------------------------- */
 function Card({
   title,
   emoji,
   route,
+  badge,
 }: {
   title: string;
   emoji: string;
   route: Href;
+  badge?: number;
 }) {
+  const [hovered, setHovered] = useState(false);
+
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={() => router.push(route)}
-      style={{
-        backgroundColor: "white",
-        padding: 20,
-        borderRadius: 16,
-        width: "48%",
-        marginBottom: 18,
-        elevation: 2,
-      }}
+      onHoverIn={Platform.OS === "web" ? () => setHovered(true) : undefined}
+      onHoverOut={Platform.OS === "web" ? () => setHovered(false) : undefined}
+      style={[
+        styles.card,
+        hovered && Platform.OS === "web" && styles.cardHover,
+      ]}
     >
-      <Text style={{ fontSize: 30 }}>{emoji}</Text>
-      <Text style={{ fontSize: 16, marginTop: 8, fontWeight: "bold" }}>
-        {title}
-      </Text>
-    </TouchableOpacity>
+      {badge !== undefined && (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>{badge}</Text>
+        </View>
+      )}
+
+      <Text style={styles.emoji}>{emoji}</Text>
+      <Text style={styles.cardTitle}>{title}</Text>
+    </Pressable>
   );
 }
 
+/* --------------------------------------------------
+   SCREEN
+-------------------------------------------------- */
 export default function AdminDashboard() {
   return (
-    <ScrollView style={{ padding: 20 }}>
-      <Text style={{ fontSize: 28, fontWeight: "bold", marginBottom: 20 }}>
-        Admin Dashboard
-      </Text>
+    <View style={{ flex: 1 }}>
+      {/* HOME ICON IN HEADER (DASHBOARD ONLY) */}
+      <AdminHeader title="Admin Dashboard" isDashboard />
 
-      <View
-        style={{
-          flexDirection: "row",
-          flexWrap: "wrap",
-          justifyContent: "space-between",
-        }}
-      >
-        {cards.map((c) => (
-          <Card key={c.title} {...c} />
-        ))}
-      </View>
-    </ScrollView>
+      <ScrollView contentContainerStyle={styles.container}>
+        <View style={styles.grid}>
+          {cards
+            .filter((c) => !c.roles || c.roles.includes(role))
+            .map((c) => (
+              <Card key={c.title} {...c} />
+            ))}
+        </View>
+      </ScrollView>
+    </View>
   );
 }
+
+/* --------------------------------------------------
+   STYLES
+-------------------------------------------------- */
+const styles = StyleSheet.create({
+  container: {
+    padding: 20,
+    paddingBottom: 40,
+  },
+
+  grid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
+
+  card: {
+    backgroundColor: "white",
+    padding: 20,
+    borderRadius: 18,
+    width: "48%",
+    marginBottom: 18,
+
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+
+    transform: [{ translateY: 0 }],
+  },
+
+  cardHover: {
+    transform: [{ translateY: -6 }],
+    shadowOpacity: 0.25,
+    shadowRadius: 14,
+  },
+
+  emoji: {
+    fontSize: 30,
+  },
+
+  cardTitle: {
+    fontSize: 16,
+    marginTop: 8,
+    fontWeight: "700",
+  },
+
+  badge: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    backgroundColor: "#e74c3c",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+
+  badgeText: {
+    color: "white",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+});

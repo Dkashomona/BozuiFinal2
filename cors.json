@@ -1,0 +1,12 @@
+[
+  {
+    "origin": [
+      "https://bozuishopworld.web.app",
+      "http://localhost:8081",
+      "http://localhost:19006"
+    ],
+    "method": ["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"],
+    "responseHeader": ["Content-Type", "Authorization"],
+    "maxAgeSeconds": 3600
+  }
+]

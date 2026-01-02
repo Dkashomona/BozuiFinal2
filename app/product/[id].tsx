@@ -1,65 +1,137 @@
 import { useLocalSearchParams, router } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   View,
   Text,
-  Image,
   ScrollView,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator, // 🔥 import spinner
+  ActivityIndicator,
+  Image,
 } from "react-native";
-import { doc, getDoc } from "firebase/firestore";
-import { db } from "../../src/services/firebase";
-import { useCartStore } from "../../src/store/cartStore";
+
+import ProductGalleryPremium from "@/src/components/products/ProductGallery";
+import ProductSpecs from "@/src/components/products/ProductSpecs";
+import ReviewList from "@/src/components/reviews/ReviewList";
+import CreateReview from "@/src/components/reviews/CreateReview";
+import If from "@/src/components/common/If";
+
+import { db, auth } from "@/src/services/firebase";
+import {
+  doc,
+  getDoc,
+  collection,
+  query,
+  where,
+  getDocs,
+} from "firebase/firestore";
+
+import { useCartStore } from "@/src/store/cartStore";
+import type { Review } from "@/src/types/review";
 
 export default function ProductPage() {
   const { id } = useLocalSearchParams();
-  const [product, setProduct] = useState<any | null>(null);
-  const [loading, setLoading] = useState(true);
+  const productId = String(id);
 
-  const [size, setSize] = useState<string | null>(null);
+  const [product, setProduct] = useState<any>(null);
+  const stock = Number(product?.stock ?? 0);
+  const inStock = stock > 0;
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>("");
+
   const [color, setColor] = useState<string | null>(null);
-  const [error, setError] = useState("");
+  const [size, setSize] = useState<string | null>(null);
+
+  const [reviews, setReviews] = useState<Review[]>([]);
 
   const addToCart = useCartStore((s) => s.addToCart);
 
-  useEffect(() => {
-    async function fetchProduct() {
-      if (!id) return;
-      const snap = await getDoc(doc(db, "products", String(id)));
-      if (snap.exists()) {
-        setProduct({ id, ...snap.data() });
-      }
-      setLoading(false);
-    }
-    fetchProduct();
-  }, [id]);
+  /* ---------------- LOAD PRODUCT ---------------- */
+  const loadProduct = useCallback(async () => {
+    if (!productId) return;
 
-  const handleAdd = () => {
-    if (!size || !color) {
-      setError("Please select size & color.");
+    const snap = await getDoc(doc(db, "products", productId));
+    if (snap.exists()) {
+      setProduct({ id: productId, ...snap.data() });
+    }
+
+    setLoading(false);
+  }, [productId]);
+
+  useEffect(() => {
+    loadProduct();
+  }, [loadProduct]);
+
+  /* ---------------- LOAD REVIEWS ---------------- */
+  const loadReviews = useCallback(async () => {
+    if (!productId) return;
+
+    const q = query(
+      collection(db, "reviews"),
+      where("productId", "==", productId)
+    );
+
+    const snap = await getDocs(q);
+
+    setReviews(
+      snap.docs
+        .map((d) => ({ ...(d.data() as Review), id: d.id }))
+        .sort(
+          (a, b) =>
+            (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0)
+        )
+    );
+  }, [productId]);
+
+  useEffect(() => {
+    loadReviews();
+  }, [loadReviews]);
+
+  /* ---------------- DERIVED ---------------- */
+  const colors = useMemo(
+    () => Object.keys(product?.colorImages ?? {}),
+    [product]
+  );
+
+  const sizes = useMemo(() => product?.sizes ?? [], [product]);
+
+  const images = useMemo(() => {
+    if (color && product?.colorImages?.[color]) {
+      return product.colorImages[color];
+    }
+    return product?.images ?? [];
+  }, [product, color]);
+
+  /* ---------------- CART ---------------- */
+  function handleAdd() {
+    if (!color || !size) {
+      setError("Please select a color and size.");
+      return;
+    }
+
+    if (!inStock) {
+      setError("This product is out of stock.");
       return;
     }
 
     addToCart({
       id: product.id,
       name: product.name,
-      image: product.images?.[0] ?? "",
+      image: images[0] ?? "",
       price: Number(product.price),
-      size,
       color,
+      size,
       qty: 1,
     });
 
     router.push("/(tabs)/cart");
-  };
+  }
 
+  /* ---------------- LOADING ---------------- */
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#e67e22" /> 
-        <Text style={{ marginTop: 10 }}>Loading product...</Text>
+        <ActivityIndicator size="large" />
       </View>
     );
   }
@@ -67,129 +139,239 @@ export default function ProductPage() {
   if (!product) {
     return (
       <View style={styles.center}>
-        <Text>Product not found.</Text>
+        <Text>Product not found</Text>
       </View>
     );
   }
 
-  const sizes = product.sizes ?? ["S", "M", "L", "XL"];
-  const colors = product.colors ?? ["Black", "White", "Blue"];
-  const images = product.images ?? [];
-
+  /* ---------------- UI ---------------- */
   return (
-    <ScrollView style={styles.page} contentContainerStyle={{ padding: 16 }}>
-      <Image
-        source={{ uri: images[0] ?? "https://via.placeholder.com/400?text=No+Image" }}
-        style={styles.image}
-      />
+    <ScrollView contentContainerStyle={styles.page}>
+      {/* BACK BUTTON */}
+      <TouchableOpacity
+        style={styles.backBtn}
+        onPress={() => {
+          if (router.canGoBack()) {
+            router.back();
+          } else {
+            router.replace("/");
+          }
+        }}
+      >
+        <Text style={styles.backText}>← Back</Text>
+      </TouchableOpacity>
+
+      <ProductGalleryPremium images={images} />
 
       <Text style={styles.name}>{product.name}</Text>
       <Text style={styles.price}>${product.price}</Text>
 
+      <Text style={styles.label}>Select Color</Text>
+      <View style={styles.row}>
+        {colors.map((c) => (
+          <TouchableOpacity
+            key={c}
+            disabled={!inStock}
+            onPress={() => setColor(c)}
+            style={[
+              styles.colorWrap,
+              color === c && styles.colorActive,
+              !inStock && styles.colorDisabled,
+            ]}
+          >
+            <Image
+              source={{ uri: product.colorImages[c][0] }}
+              style={styles.color}
+            />
+
+            {!inStock && <Text style={styles.outText}>OUT</Text>}
+          </TouchableOpacity>
+        ))}
+      </View>
+
       <Text style={styles.label}>Select Size</Text>
+
       <View style={styles.row}>
         {sizes.map((s: string) => (
           <TouchableOpacity
             key={s}
+            disabled={!inStock}
             onPress={() => setSize(s)}
-            style={[styles.opt, size === s && styles.optActive]}
+            style={[
+              styles.sizeBtn,
+              size === s && styles.sizeActive,
+              !inStock && styles.sizeDisabled,
+            ]}
           >
-            <Text style={[styles.optText, size === s && styles.optActiveText]}>
+            <Text
+              style={[styles.sizeText, !inStock && styles.sizeTextDisabled]}
+            >
               {s}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      <Text style={styles.label}>Select Color</Text>
-      <View style={styles.row}>
-        {colors.map((c: string) => (
-          <TouchableOpacity
-            key={c}
-            onPress={() => setColor(c)}
-            style={[styles.opt, color === c && styles.optActive]}
-          >
-            <Text style={[styles.optText, color === c && styles.optActiveText]}>
-              {c}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {error !== "" && <Text style={styles.error}>{error}</Text>}
+      <If condition={!!error}>
+        <Text style={styles.error}>{error}</Text>
+      </If>
 
       <TouchableOpacity style={styles.cartBtn} onPress={handleAdd}>
         <Text style={styles.cartTxt}>Add to Cart</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.closeBtn} onPress={() => router.back()}>
-        <Text style={{ color: "#666" }}>⬅ Back</Text>
-      </TouchableOpacity>
+      <ProductSpecs product={product} />
+
+      {/* -------- REVIEWS -------- */}
+      <Text style={styles.reviewHeader}>Customer Reviews</Text>
+
+      <If condition={!!auth.currentUser}>
+        <CreateReview productId={productId} onSubmitted={loadReviews} />
+      </If>
+
+      <ReviewList
+        productId={productId}
+        reviews={reviews}
+        reloadReviews={loadReviews}
+        user={auth.currentUser ?? null}
+      />
     </ScrollView>
   );
 }
 
+/* ---------------- STYLES ---------------- */
 const styles = StyleSheet.create({
-  page: { backgroundColor: "#f5f5f5" },
-  center: {
-    flex: 1,
+  page: { padding: 16 },
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  name: { fontSize: 26, fontWeight: "700" },
+  price: { fontSize: 22, fontWeight: "700" },
+  label: { marginTop: 20, fontWeight: "700" },
+  row: { flexDirection: "row", gap: 10, marginTop: 8 },
+  color: { width: 50, height: 50, borderRadius: 10 },
+  cartBtn: { marginTop: 20, backgroundColor: "#111", padding: 16 },
+  cartTxt: { color: "#fff", textAlign: "center" },
+  error: { color: "red", marginTop: 10 },
+  reviewHeader: { marginTop: 30, fontSize: 24, fontWeight: "700" },
+  sizePill: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#ddd",
+    backgroundColor: "#fff",
+  },
+
+  sizePillActive: {
+    backgroundColor: "#1E90FF", // blue
+    borderColor: "#1E90FF",
+  },
+
+  sizeTextActive: {
+    color: "#fff",
+  },
+
+  colorFrame: {
+    width: 58,
+    height: 58,
+    borderRadius: 12,
+    padding: 3,
+    borderWidth: 2,
+    borderColor: "#e5e7eb",
+    backgroundColor: "#fff",
     justifyContent: "center",
     alignItems: "center",
   },
-  image: {
+
+  colorFrameActive: {
+    borderColor: "#1E90FF",
+  },
+
+  colorFrameDisabled: {
+    borderColor: "#ddd",
+    backgroundColor: "#f3f4f6",
+  },
+
+  colorImage: {
     width: "100%",
-    height: 300,
-    borderRadius: 12,
-    backgroundColor: "#ddd",
-  },
-  name: {
-    marginTop: 12,
-    fontSize: 24,
-    fontWeight: "700",
-  },
-  price: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#e67e22",
-    marginBottom: 16,
-  },
-  label: {
-    marginTop: 16,
-    fontWeight: "bold",
-  },
-  row: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    marginTop: 8,
-    gap: 8,
-  },
-  opt: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: "#eee",
+    height: "100%",
     borderRadius: 8,
   },
-  optActive: {
-    backgroundColor: "#222",
+
+  colorImageDisabled: {
+    opacity: 0.35,
   },
-  optText: {
-    fontSize: 14,
-  },
-  optActiveText: {
-    color: "white",
-    fontWeight: "bold",
-  },
-  cartBtn: {
-    marginTop: 20,
-    backgroundColor: "#222",
-    padding: 14,
+
+  outBadge: {
+    position: "absolute",
+    top: -6,
+    right: -6,
+    backgroundColor: "#111",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
     borderRadius: 10,
   },
-  cartTxt: {
-    color: "white",
-    textAlign: "center",
+
+  backBtn: {
+    marginBottom: 12,
+    alignSelf: "flex-start",
+    backgroundColor: "#f1f1f1",
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+  },
+
+  backText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111",
+  },
+  colorWrap: {
+    borderRadius: 12,
+    padding: 3,
+    borderWidth: 2,
+    borderColor: "transparent",
+    position: "relative",
+  },
+
+  colorActive: {
+    borderColor: "#1E90FF",
+  },
+
+  colorDisabled: {
+    opacity: 0.4,
+  },
+
+  outText: {
+    position: "absolute",
+    bottom: 2,
+    right: 4,
+    fontSize: 10,
+    fontWeight: "800",
+    color: "red",
+  },
+
+  sizeBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#ccc",
+  },
+
+  sizeActive: {
+    backgroundColor: "#1E90FF",
+    borderColor: "#1E90FF",
+  },
+
+  sizeDisabled: {
+    opacity: 0.4,
+  },
+
+  sizeText: {
     fontWeight: "700",
   },
-  closeBtn: { marginTop: 18, alignItems: "center" },
-  error: { color: "red", marginTop: 10 },
+
+  sizeTextDisabled: {
+    color: "#999",
+  },
 });

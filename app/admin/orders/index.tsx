@@ -11,7 +11,11 @@ import {
 import { db } from "../../../src/services/firebase";
 import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 import { router, type Href } from "expo-router";
+import AdminHeader from "../../../src/components/admin/AdminHeader";
 
+/* --------------------------------------------------
+   CONSTANTS
+-------------------------------------------------- */
 const STATUS_OPTIONS = [
   "all",
   "pending",
@@ -33,6 +37,9 @@ const STATUS_COLORS = {
   cancelled: "#c0392b",
 };
 
+/* --------------------------------------------------
+   SCREEN
+-------------------------------------------------- */
 export default function OrdersDashboard() {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,7 +81,7 @@ export default function OrdersDashboard() {
       return diff <= 30;
     }
 
-    return true; // ALL
+    return true;
   }
 
   const filtered = orders
@@ -96,136 +103,130 @@ export default function OrdersDashboard() {
   }
 
   return (
-    <ScrollView style={styles.page}>
-      {/* BACK BUTTON */}
-      <TouchableOpacity
-        style={styles.backBtn}
-        onPress={() => router.push("/admin")}
-      >
-        <Text style={styles.backText}>← Back to Admin Panel</Text>
-      </TouchableOpacity>
+    <View style={{ flex: 1 }}>
+      {/* STICKY ADMIN HEADER */}
+      <AdminHeader title="Orders" />
 
-      <Text style={styles.title}>Orders</Text>
+      <ScrollView contentContainerStyle={styles.page}>
+        {/* 🔍 SEARCH ORDER BY ID */}
+        <TextInput
+          placeholder="Search orders by ID..."
+          value={search}
+          onChangeText={setSearch}
+          style={styles.input}
+        />
 
-      {/* 🔍 SEARCH ORDER BY ID */}
-      <TextInput
-        placeholder="Search orders by ID..."
-        value={search}
-        onChangeText={setSearch}
-        style={styles.input}
-      />
+        {/* 🔍 SEARCH BY CUSTOMER */}
+        <TextInput
+          placeholder="Search by customer email..."
+          value={customerSearch}
+          onChangeText={setCustomerSearch}
+          style={styles.input}
+        />
 
-      {/* 🔍 SEARCH BY CUSTOMER */}
-      <TextInput
-        placeholder="Search by customer email..."
-        value={customerSearch}
-        onChangeText={setCustomerSearch}
-        style={styles.input}
-      />
-
-      {/* 🔘 STATUS FILTERS */}
-      <ScrollView
-        horizontal
-        style={styles.filterRow}
-        showsHorizontalScrollIndicator={false}
-      >
-        {STATUS_OPTIONS.map((s) => (
-          <TouchableOpacity
-            key={s}
-            style={[
-              styles.filterBtn,
-              statusFilter === s && styles.filterBtnActive,
-            ]}
-            onPress={() => setStatusFilter(s)}
-          >
-            <Text
-              style={[
-                styles.filterText,
-                statusFilter === s && styles.filterTextActive,
-              ]}
-            >
-              {s.toUpperCase()}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      {/* 🔘 DATE FILTERS */}
-      <ScrollView
-        horizontal
-        style={styles.filterRow}
-        showsHorizontalScrollIndicator={false}
-      >
-        {DATE_FILTERS.map((d) => (
-          <TouchableOpacity
-            key={d}
-            style={[
-              styles.filterBtn,
-              dateFilter === d && styles.filterBtnActive,
-            ]}
-            onPress={() => setDateFilter(d)}
-          >
-            <Text
-              style={[
-                styles.filterText,
-                dateFilter === d && styles.filterTextActive,
-              ]}
-            >
-              {d.toUpperCase()}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      {/* 🧾 ORDER LIST */}
-      {filtered.map((order) => (
-        <TouchableOpacity
-          key={order.id}
-          onPress={() =>
-            router.push({
-              pathname: "/admin/orders/[id]",
-              params: { id: order.id },
-            } as Href)
-          }
-          style={styles.card}
+        {/* 🔘 STATUS FILTERS */}
+        <ScrollView
+          horizontal
+          style={styles.filterRow}
+          showsHorizontalScrollIndicator={false}
         >
-          <Text style={styles.orderId}>Order #{order.id}</Text>
+          {STATUS_OPTIONS.map((s) => (
+            <TouchableOpacity
+              key={s}
+              style={[
+                styles.filterBtn,
+                statusFilter === s && styles.filterBtnActive,
+              ]}
+              onPress={() => setStatusFilter(s)}
+            >
+              <Text
+                style={[
+                  styles.filterText,
+                  statusFilter === s && styles.filterTextActive,
+                ]}
+              >
+                {s.toUpperCase()}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
 
-          <Text style={styles.total}>
-            Total: ${order.total?.toFixed(2) ?? "0.00"}
-          </Text>
+        {/* 🔘 DATE FILTERS */}
+        <ScrollView
+          horizontal
+          style={styles.filterRow}
+          showsHorizontalScrollIndicator={false}
+        >
+          {DATE_FILTERS.map((d) => (
+            <TouchableOpacity
+              key={d}
+              style={[
+                styles.filterBtn,
+                dateFilter === d && styles.filterBtnActive,
+              ]}
+              onPress={() => setDateFilter(d)}
+            >
+              <Text
+                style={[
+                  styles.filterText,
+                  dateFilter === d && styles.filterTextActive,
+                ]}
+              >
+                {d.toUpperCase()}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
 
-          <Text
-            style={[
-              styles.badge,
-              {
-                backgroundColor:
-                  STATUS_COLORS[order.status as keyof typeof STATUS_COLORS] ||
-                  "#ccc",
-              },
-            ]}
+        {/* 🧾 ORDER LIST */}
+        {filtered.map((order) => (
+          <TouchableOpacity
+            key={order.id}
+            onPress={() =>
+              router.push({
+                pathname: "/admin/orders/[id]",
+                params: { id: order.id },
+              } as Href)
+            }
+            style={styles.card}
           >
-            {order.status?.toUpperCase()}
-          </Text>
-        </TouchableOpacity>
-      ))}
+            <Text style={styles.orderId}>Order #{order.id}</Text>
 
-      {filtered.length === 0 && (
-        <Text style={{ marginTop: 20, textAlign: "center", color: "#999" }}>
-          No orders match your filters.
-        </Text>
-      )}
-    </ScrollView>
+            <Text style={styles.total}>
+              Totalaaaa: ${order.total?.toFixed(2) ?? "0.00"}
+            </Text>
+
+            <Text
+              style={[
+                styles.badge,
+                {
+                  backgroundColor:
+                    STATUS_COLORS[order.status as keyof typeof STATUS_COLORS] ||
+                    "#ccc",
+                },
+              ]}
+            >
+              {order.status?.toUpperCase()}
+            </Text>
+          </TouchableOpacity>
+        ))}
+
+        {filtered.length === 0 && (
+          <Text style={styles.empty}>No orders match your filters.</Text>
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
+/* --------------------------------------------------
+   STYLES
+-------------------------------------------------- */
 const styles = StyleSheet.create({
-  page: { padding: 20, flex: 1 },
-
-  backBtn: { marginBottom: 10 },
-  backText: { color: "#e67e22", fontSize: 16, fontWeight: "700" },
-
-  title: { fontSize: 28, fontWeight: "bold", marginBottom: 10 },
+  page: {
+    padding: 20,
+    paddingBottom: 40,
+  },
 
   input: {
     padding: 12,
@@ -267,8 +268,10 @@ const styles = StyleSheet.create({
     padding: 18,
     borderRadius: 14,
     marginBottom: 15,
+
     shadowColor: "#000",
     shadowOpacity: 0.1,
+    shadowRadius: 6,
     elevation: 2,
   },
 
@@ -285,5 +288,15 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
 
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  empty: {
+    marginTop: 20,
+    textAlign: "center",
+    color: "#999",
+  },
+
+  center: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
 });

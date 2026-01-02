@@ -1,227 +1,121 @@
-/*
 import { router } from "expo-router";
-import React, { useState } from "react";
-import {
-  Button,
-  Image,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
-import { logout } from "../../../src/services/authService";
-import { createProduct } from "../../../src/services/productService";
-import { uploadImageAsync } from "../../../src/services/uploadService";
-import { pickImage } from "../../../src/utils/pickImage";
-
-export default function AddProductScreen() {
-  const [images, setImages] = useState<string[]>([]);
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [price, setPrice] = useState("");
-  const [stock, setStock] = useState("");
-  const [categoryId, setCategoryId] = useState("");
-  const [subcategoryId, setSubcategoryId] = useState("");
-
-  const [variants, setVariants] = useState(""); // "S,M,L"
-  const [variantStock, setVariantStock] = useState(""); // "10,15,8"
-
-  async function addImage() {
-    const uri = await pickImage();
-    if (uri) setImages([...images, uri]);
-  }
-
-  async function save() {
-    if (!name.trim()) return alert("Product name required");
-    if (!price.trim()) return alert("Price required");
-
-    const id = Date.now().toString();
-    const uploaded: string[] = [];
-
-    for (let i = 0; i < images.length; i++) {
-      const url = await uploadImageAsync(
-        images[i],
-        `products/${id}/${i}.jpg`
-      );
-      uploaded.push(url);
-    }
-
-    const product = {
-      name,
-      description,
-      price: parseFloat(price),
-      stock: parseInt(stock) || 0,
-      currency: "USD",
-      categoryId,
-      subcategoryId,
-
-      variants: variants.split(",").map((v) => v.trim()),
-      variantStock: variantStock.split(",").map((v) => v.trim()),
-
-      rating: 0,
-      reviewsCount: 0,
-      views: 0,
-
-      colorImages: {},
-
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-
-    await createProduct(id, product, uploaded);
-
-    alert("Product saved!");
-    router.push("/admin/products");
-  }
-
-  return (
-    <ScrollView style={{ padding: 20 }}>
-      {/* LOGOUT *
-      <Button
-        title="🚪 Sign Out"
-        color="red"
-        onPress={async () => {
-          await logout();
-          router.replace("/login");
-        }}
-      />
-
-      <Text style={{ marginTop: 20 }}>Product Name</Text>
-      <TextInput
-        value={name}
-        onChangeText={setName}
-        placeholder="Classic T-Shirt"
-        style={input}
-      />
-
-      <Text>Description</Text>
-      <TextInput
-        value={description}
-        onChangeText={setDescription}
-        placeholder="Simple comfortable cotton t-shirt"
-        style={[input, { height: 80 }]}
-        multiline
-      />
-
-      <Text>Price (USD)</Text>
-      <TextInput
-        keyboardType="numeric"
-        value={price}
-        onChangeText={setPrice}
-        placeholder="19.99"
-        style={input}
-      />
-
-      <Text>Stock</Text>
-      <TextInput
-        keyboardType="numeric"
-        value={stock}
-        onChangeText={setStock}
-        placeholder="30"
-        style={input}
-      />
-
-      <Text>Category ID</Text>
-      <TextInput
-        value={categoryId}
-        onChangeText={setCategoryId}
-        placeholder="Fashion ID"
-        style={input}
-      />
-
-      <Text>Subcategory ID</Text>
-      <TextInput
-        value={subcategoryId}
-        onChangeText={setSubcategoryId}
-        placeholder="Men ID"
-        style={input}
-      />
-
-      <Text>Variants (comma separated)</Text>
-      <TextInput
-        value={variants}
-        onChangeText={setVariants}
-        placeholder='S,M,L,XL'
-        style={input}
-      />
-
-      <Text>Variant Stock</Text>
-      <TextInput
-        value={variantStock}
-        onChangeText={setVariantStock}
-        placeholder='12,10,8'
-        style={input}
-      />
-
-      <Button title="Add Image" onPress={addImage} />
-
-      {images.map((img, i) => (
-        <Image
-          key={i}
-          source={{ uri: img }}
-          style={{ width: 120, height: 120, marginTop: 10 }}
-        />
-      ))}
-
-      <View style={{ marginTop: 20 }}>
-        <Button title="💾 Save Product" onPress={save} />
-      </View>
-    </ScrollView>
-  );
-}
-
-const input = {
-  borderWidth: 1,
-  borderColor: "#ccc",
-  padding: 10,
-  borderRadius: 8,
-  marginBottom: 20,
-  marginTop: 10,
-};
-*/
 import * as ImagePicker from "expo-image-picker";
-import { router } from "expo-router";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
-  Button,
+  Pressable,
   ScrollView,
   Text,
   TextInput,
   View,
+  StyleSheet,
+  Platform,
 } from "react-native";
+
+import AdminHeader from "../../../src/components/admin/AdminHeader";
 import CategoryDropdown from "../../../src/components/admin/CategoryDropdown";
-import ColorImageUploader, {
-  ColorImage,
-} from "../../../src/components/admin/ColorImageUploader";
 import SubcategoryDropdown from "../../../src/components/admin/SubcategoryDropdown";
-import { logout } from "../../../src/services/authService";
+import ColorImageUploader from "../../../src/components/admin/ColorImageUploader";
 import { db } from "../../../src/services/firebase";
 import { uploadImageAsync } from "../../../src/services/uploadService";
 
+/* --------------------------------------------------
+   TYPES
+-------------------------------------------------- */
+type ColorImageGroup = {
+  color: string;
+  images: string[];
+};
+
+type Errors = {
+  name?: string;
+  description?: string;
+  price?: string;
+  stock?: string;
+  sizes?: string;
+  categoryId?: string;
+  subcategoryId?: string;
+  images?: string;
+};
+
+/* --------------------------------------------------
+   HELPERS
+-------------------------------------------------- */
+function generateSKU(name: string, categoryId: string) {
+  const base = `${categoryId || "GEN"}-${name || "ITEM"}`
+    .replace(/\s+/g, "-")
+    .toUpperCase();
+  return `${base}-${Date.now().toString().slice(-6)}`;
+}
+
+function parseSizes(value: string): string[] {
+  return value
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/* --------------------------------------------------
+   SCREEN
+-------------------------------------------------- */
 export default function AddProductScreen() {
-  const [colorImagesList, setColorImagesList] = useState<ColorImage[]>([]);
+  /* ---------------- STATE ---------------- */
+  const [colorGroups, setColorGroups] = useState<ColorImageGroup[]>([]);
   const [videoUri, setVideoUri] = useState<string | null>(null);
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
   const [stock, setStock] = useState("");
+  const [sizesInput, setSizesInput] = useState("");
 
   const [categoryId, setCategoryId] = useState("");
   const [subcategoryId, setSubcategoryId] = useState("");
 
-  const [sizes, setSizes] = useState(""); // "S,M,L,XL"
-  const [colors, setColors] = useState(""); // "white,black"
-  const [variantStock, setVariantStock] = useState(""); // "12,10,8"
+  const [status, setStatus] = useState<"draft" | "published">("draft");
+  const [sku, setSku] = useState("");
 
+  const [errors, setErrors] = useState<Errors>({});
   const [saving, setSaving] = useState(false);
 
+  /* ---------------- SKU AUTO ---------------- */
+  useEffect(() => {
+    if (!sku && (name || categoryId)) {
+      setSku(generateSKU(name, categoryId));
+    }
+  }, [name, categoryId, sku]);
+
+  /* ---------------- VALIDATION ---------------- */
+  function validate(): boolean {
+    const e: Errors = {};
+
+    if (!name.trim()) e.name = "Product name required";
+    if (!description.trim()) e.description = "Description required";
+    if (!price || isNaN(Number(price))) e.price = "Valid price required";
+    if (!stock || isNaN(Number(stock))) e.stock = "Valid stock required";
+
+    const sizes = parseSizes(sizesInput);
+    if (sizes.length === 0) e.sizes = "At least one size required";
+
+    if (!categoryId) e.categoryId = "Select a category";
+    if (!subcategoryId) e.subcategoryId = "Select a subcategory";
+
+    const imageCount = colorGroups.reduce((sum, g) => sum + g.images.length, 0);
+    if (imageCount === 0) e.images = "At least one image required";
+
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  }
+
+  function clearError(field: keyof Errors) {
+    setErrors((p) => ({ ...p, [field]: undefined }));
+  }
+
+  /* ---------------- VIDEO ---------------- */
   async function pickVideo() {
     const res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-      allowsMultipleSelection: false,
-      quality: 0.7,
+      quality: 0.8,
     });
 
     if (!res.canceled && res.assets.length > 0) {
@@ -229,212 +123,309 @@ export default function AddProductScreen() {
     }
   }
 
-  async function save() {
-    try {
-      if (!name.trim()) return alert("Product name required");
-      if (!price.trim()) return alert("Price required");
-      if (!categoryId) return alert("Category required");
-      if (!subcategoryId) return alert("Subcategory required");
-      if (colorImagesList.length === 0)
-        return alert("Add at least one image with a color");
+  /* ---------------- SAVE ---------------- */
+  async function saveProduct() {
+    if (!validate()) return;
 
-      // Ensure each image has a color
-      for (const img of colorImagesList) {
-        if (!img.color.trim()) {
-          return alert("Every image must have a color");
+    try {
+      setSaving(true);
+
+      const productId = Date.now().toString();
+      const allImages: string[] = [];
+      const colorImages: Record<string, string[]> = {};
+
+      for (const group of colorGroups) {
+        colorImages[group.color] = [];
+
+        for (let i = 0; i < group.images.length; i++) {
+          const uri = group.images[i];
+          const url = await uploadImageAsync(
+            uri,
+            `products/${productId}/${group.color}/${i}.jpg`
+          );
+          allImages.push(url);
+          colorImages[group.color].push(url);
         }
       }
 
-      setSaving(true);
-
-      const id = Date.now().toString();
-      const imageUrls: string[] = [];
-      const colorImagesMap: Record<string, string> = {};
-
-      // Upload all images, map color -> image URL
-      for (let i = 0; i < colorImagesList.length; i++) {
-        const item = colorImagesList[i];
-        const url = await uploadImageAsync(
-          item.uri,
-          `products/${id}/${i}.jpg`
-        );
-        imageUrls.push(url);
-        colorImagesMap[item.color] = url;
-      }
-
-      // Upload video if provided
       let videoUrl: string | null = null;
       if (videoUri) {
-        videoUrl = await uploadImageAsync(videoUri, `products/${id}/video.mp4`);
+        videoUrl = await uploadImageAsync(
+          videoUri,
+          `products/${productId}/video.mp4`
+        );
       }
 
-      const productData = {
+      await addDoc(collection(db, "products"), {
         name,
         description,
-        price: parseFloat(price),
-        currency: "USD",
-
+        sku,
+        status,
+        price: Number(price),
+        stock: Number(stock),
+        sizes: parseSizes(sizesInput),
         categoryId,
         subcategoryId,
-
-        images: imageUrls,
-        colorImages: colorImagesMap,
+        images: allImages,
+        colorImages,
         video: videoUrl,
-
-        stock: parseInt(stock) || 0,
-
-        variants: {
-          sizes: sizes
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean),
-          colors: colors
-            .split(",")
-            .map((c) => c.trim())
-            .filter(Boolean),
-        },
-
-        variantStock: variantStock
-          .split(",")
-          .map((v) => v.trim())
-          .filter(Boolean),
-
-        rating: 0,
-        reviewsCount: 0,
-        views: 0,
-
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      };
+      });
 
-      await addDoc(collection(db, "products"), productData);
-
-      alert("Product saved!");
+      alert("Product saved");
       router.push("/admin/products");
-    } catch (e) {
-      console.error(e);
-      alert("Error saving product");
     } finally {
       setSaving(false);
     }
   }
 
+  /* ---------------- UI ---------------- */
   return (
-    <ScrollView style={{ padding: 20 }}>
-      {/* Sign Out */}
-      <Button
-        title="🚪 Sign Out"
-        color="red"
-        onPress={async () => {
-          await logout();
-          router.replace("/login");
-        }}
-      />
+    <View style={{ flex: 1 }}>
+      <AdminHeader title="Add Product" />
 
-      <Text style={{ fontSize: 22, fontWeight: "bold", marginTop: 20 }}>
-        Add Product
-      </Text>
+      <ScrollView contentContainerStyle={styles.page}>
+        {/* STATUS + SKU */}
+        <View style={styles.row}>
+          <Pressable
+            style={[
+              styles.statusPill,
+              status === "published" && styles.statusActive,
+            ]}
+            onPress={() =>
+              setStatus(status === "draft" ? "published" : "draft")
+            }
+          >
+            <Text style={styles.statusText}>
+              {status === "draft" ? "Draft" : "Published"}
+            </Text>
+          </Pressable>
 
-      {/* Basic fields */}
-      <Text style={{ marginTop: 20 }}>Product Name</Text>
-      <TextInput
-        value={name}
-        onChangeText={setName}
-        placeholder="Classic T-Shirt"
-        style={input}
-      />
+          <Field label="SKU">
+            <TextInput value={sku} onChangeText={setSku} style={styles.input} />
+          </Field>
+        </View>
 
-      <Text>Description</Text>
-      <TextInput
-        value={description}
-        onChangeText={setDescription}
-        placeholder="Simple comfortable cotton t-shirt."
-        style={[input, { height: 80 }]}
-        multiline
-      />
+        <Card title="Basic Information">
+          <Field label="Name" error={errors.name}>
+            <TextInput
+              value={name}
+              onChangeText={(v) => {
+                setName(v);
+                clearError("name");
+              }}
+              style={[styles.input, errors.name && styles.inputError]}
+            />
+          </Field>
 
-      <Text>Price (USD)</Text>
-      <TextInput
-        value={price}
-        onChangeText={setPrice}
-        placeholder="19.99"
-        keyboardType="decimal-pad"
-        style={input}
-      />
+          <Field label="Description" error={errors.description}>
+            <TextInput
+              value={description}
+              multiline
+              style={[
+                styles.input,
+                styles.textArea,
+                errors.description && styles.inputError,
+              ]}
+              onChangeText={(v) => {
+                setDescription(v);
+                clearError("description");
+              }}
+            />
+          </Field>
 
-      <Text>Stock</Text>
-      <TextInput
-        value={stock}
-        onChangeText={setStock}
-        placeholder="30"
-        keyboardType="number-pad"
-        style={input}
-      />
+          <View style={styles.row}>
+            <Field label="Price ($)" error={errors.price}>
+              <TextInput
+                keyboardType="numeric"
+                value={price}
+                onChangeText={(v) => {
+                  setPrice(v);
+                  clearError("price");
+                }}
+                style={[styles.input, errors.price && styles.inputError]}
+              />
+            </Field>
 
-      {/* Category & Subcategory */}
-      <CategoryDropdown value={categoryId} onChange={setCategoryId} />
-      <SubcategoryDropdown
-        categoryId={categoryId}
-        value={subcategoryId}
-        onChange={setSubcategoryId}
-      />
+            <Field label="Stock" error={errors.stock}>
+              <TextInput
+                keyboardType="numeric"
+                value={stock}
+                onChangeText={(v) => {
+                  setStock(v);
+                  clearError("stock");
+                }}
+                style={[styles.input, errors.stock && styles.inputError]}
+              />
+            </Field>
+          </View>
 
-      {/* Variants */}
-      <Text>Sizes (comma separated)</Text>
-      <TextInput
-        value={sizes}
-        onChangeText={setSizes}
-        placeholder="S,M,L,XL"
-        style={input}
-      />
+          <Field label="Sizes (comma separated)" error={errors.sizes}>
+            <TextInput
+              placeholder="S, M, L, XL"
+              value={sizesInput}
+              onChangeText={(v) => {
+                setSizesInput(v);
+                clearError("sizes");
+              }}
+              style={[styles.input, errors.sizes && styles.inputError]}
+            />
+          </Field>
+        </Card>
 
-      <Text>Colors (comma separated)</Text>
-      <TextInput
-        value={colors}
-        onChangeText={setColors}
-        placeholder="white,black"
-        style={input}
-      />
+        <Card title="Category & Subcategory">
+          <Field error={errors.categoryId}>
+            <CategoryDropdown
+              value={categoryId}
+              onChange={(v) => {
+                setCategoryId(v);
+                clearError("categoryId");
+              }}
+            />
+          </Field>
 
-      <Text>Variant Stock (comma separated)</Text>
-      <TextInput
-        value={variantStock}
-        onChangeText={setVariantStock}
-        placeholder="12,10,8"
-        style={input}
-      />
+          <Field error={errors.subcategoryId}>
+            <SubcategoryDropdown
+              categoryId={categoryId}
+              value={subcategoryId}
+              onChange={(v) => {
+                setSubcategoryId(v);
+                clearError("subcategoryId");
+              }}
+            />
+          </Field>
+        </Card>
 
-      {/* Color → Image uploader */}
-      <ColorImageUploader images={colorImagesList} setImages={setColorImagesList} />
+        <Card title="Images (up to 5 per color)" error={errors.images}>
+          <ColorImageUploader
+            groups={colorGroups}
+            setGroups={setColorGroups}
+            maxPerColor={5}
+          />
+        </Card>
 
-      {/* Video upload */}
-      <View style={{ marginTop: 20 }}>
-        <Button title="Add Video (optional)" onPress={pickVideo} />
-        {videoUri && (
-          <Text style={{ marginTop: 8, fontSize: 12 }}>
-            Video selected: {videoUri.substring(0, 30)}...
-          </Text>
-        )}
-      </View>
+        <Card title="Product Video (optional)">
+          <Pressable style={styles.videoBtn} onPress={pickVideo}>
+            <Text style={styles.videoText}>
+              {videoUri ? "Change Video" : "Add Product Video"}
+            </Text>
+          </Pressable>
+        </Card>
+      </ScrollView>
 
-      {/* Save */}
-      <View style={{ marginTop: 30 }}>
-        <Button
-          title={saving ? "Saving..." : "💾 Save Product"}
-          onPress={save}
-          disabled={saving}
-        />
-      </View>
-    </ScrollView>
+      <Pressable
+        style={styles.saveButton}
+        onPress={saveProduct}
+        disabled={saving}
+      >
+        <Text style={styles.saveText}>
+          {saving ? "Saving..." : "Save Product"}
+        </Text>
+      </Pressable>
+    </View>
   );
 }
 
-const input = {
-  borderWidth: 1,
-  borderColor: "#ccc",
-  padding: 10,
-  borderRadius: 8,
-  marginBottom: 16,
-  marginTop: 6,
-};
+/* --------------------------------------------------
+   UI HELPERS
+-------------------------------------------------- */
+function Card({
+  title,
+  children,
+  error,
+}: {
+  title: string;
+  children: React.ReactNode;
+  error?: string;
+}) {
+  return (
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>{title}</Text>
+      {children}
+      {error && <Text style={styles.errorText}>{error}</Text>}
+    </View>
+  );
+}
 
+function Field({
+  label,
+  children,
+  error,
+}: {
+  label?: string;
+  children: React.ReactNode;
+  error?: string;
+}) {
+  return (
+    <View style={{ flex: 1 }}>
+      {label && <Text style={styles.label}>{label}</Text>}
+      {children}
+      {error && <Text style={styles.errorText}>{error}</Text>}
+    </View>
+  );
+}
+
+/* --------------------------------------------------
+   STYLES
+-------------------------------------------------- */
+const styles = StyleSheet.create({
+  page: {
+    padding: 16,
+    paddingBottom: 140,
+    backgroundColor: Platform.OS === "web" ? "#eef1f4" : "#f4f6f8",
+  },
+  card: {
+    backgroundColor: "white",
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 18,
+    ...(Platform.OS === "web" && {
+      boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+    }),
+  },
+  cardTitle: { fontSize: 16, fontWeight: "900", marginBottom: 12 },
+  label: { fontWeight: "700", marginBottom: 6 },
+  input: {
+    backgroundColor: "#f9fafb",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderRadius: 14,
+    padding: 12,
+  },
+  textArea: { height: 100, textAlignVertical: "top" },
+  inputError: { borderColor: "#ef4444" },
+  errorText: {
+    color: "#ef4444",
+    fontSize: 12,
+    marginTop: 6,
+    fontWeight: "600",
+  },
+  row: { flexDirection: "row", gap: 12, marginBottom: 16 },
+  statusPill: {
+    backgroundColor: "#e5e7eb",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 999,
+  },
+  statusActive: { backgroundColor: "#16a34a" },
+  statusText: { color: "white", fontWeight: "900" },
+  videoBtn: {
+    backgroundColor: "#111827",
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: "center",
+  },
+  videoText: { color: "white", fontWeight: "900" },
+  saveButton: {
+    position: "absolute",
+    bottom: 20,
+    left: 20,
+    right: 20,
+    backgroundColor: "#e67e22",
+    paddingVertical: 16,
+    borderRadius: 24,
+    alignItems: "center",
+  },
+  saveText: { color: "white", fontSize: 16, fontWeight: "900" },
+});

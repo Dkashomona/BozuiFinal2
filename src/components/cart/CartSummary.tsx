@@ -6,111 +6,96 @@ import {
   TouchableOpacity,
 } from "react-native";
 import { useState, useEffect, useMemo } from "react";
-import { applyDiscounts } from "../../utils/discountEngine";
+import {
+  applyItemDiscount,
+  applyCartDiscount,
+} from "../../utils/discountEngine";
 import { db } from "../../services/firebase";
 import { doc, onSnapshot, getDocs, collection } from "firebase/firestore";
 import { calculateTax } from "../../services/taxService";
 
 type CartItem = {
   id: string;
-  name: string;
   price: number;
   qty: number;
   weight?: number;
 };
 
-export interface CartSummaryProps {
-  items: CartItem[];
-  campaigns: any[];
-  userData: any;
-  zip?: string;
-}
-
-export default function CartSummary({
-  items,
-  campaigns,
-  userData,
-  zip,
-}: CartSummaryProps) {
-  /* ----------------------------- STATE ----------------------------- */
+export default function CartSummary({ items, campaigns, userData, zip }: any) {
   const [config, setConfig] = useState<any>(null);
   const [zones, setZones] = useState<any[]>([]);
-  const [shipping, setShipping] = useState<number>(0);
+  const [shipping, setShipping] = useState(0);
   const [promoInput, setPromoInput] = useState("");
-  const [coupon, setCoupon] = useState<any>(null);
 
-  /* -------------------- LOAD CART CONFIG -------------------- */
+  /* ---------------- CONFIG ---------------- */
   useEffect(() => {
     return onSnapshot(doc(db, "settings", "cartConfig"), (snap) => {
       if (snap.exists()) setConfig(snap.data());
     });
   }, []);
 
-  /* -------------------- LOAD SHIPPING ZONES -------------------- */
+  /* ---------------- ZONES ---------------- */
   useEffect(() => {
     async function loadZones() {
       const snap = await getDocs(collection(db, "shipping_zones"));
-      const arr: any[] = [];
-      snap.forEach((d) => arr.push({ id: d.id, ...d.data() }));
-      setZones(arr);
+      setZones(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     }
     loadZones();
   }, []);
 
-  /* -------------------- ALWAYS-CALL HOOKS -------------------- */
-
-  // Subtotal
-  const subtotal = useMemo(
-    () => items.reduce((sum, i) => sum + Number(i.price) * Number(i.qty), 0),
-    [items]
-  );
-
-  // Weight
-  const totalWeight = useMemo(
-    () => items.reduce((w, i) => w + (i.weight ?? 0) * i.qty, 0),
-    [items]
-  );
-
-  // Discounts
-  const { totalPrice, totalDiscount } = useMemo(() => {
-    let final = 0;
-    let saved = 0;
+  /* ---------------- CART TOTALS ---------------- */
+  const { subtotal, discount, total } = useMemo(() => {
+    let subtotal = 0;
+    let discountedSubtotal = 0;
 
     for (const item of items) {
-      const d = applyDiscounts(
+      const result = applyItemDiscount({
         item,
+        qty: item.qty,
         campaigns,
         userData,
-        item.qty,
-        coupon,
-        subtotal
-      );
+      });
 
-      const original = d.originalPrice * item.qty;
-      const newPrice = d.price * item.qty;
-
-      final += newPrice;
-      saved += original - newPrice;
+      subtotal += item.price * item.qty;
+      discountedSubtotal += result.price * item.qty;
     }
 
-    return { totalPrice: final, totalDiscount: saved };
-  }, [items, campaigns, userData, coupon, subtotal]);
+    const finalTotal = applyCartDiscount({
+      subtotal: discountedSubtotal,
+      campaigns,
+      userData,
+    });
 
-  // Tax placeholder (safe even if config is null)
+    return {
+      subtotal,
+      discount: subtotal - finalTotal,
+      total: finalTotal,
+    };
+  }, [items, campaigns, userData]);
+
+  /* ---------------- WEIGHT ---------------- */
+  const totalWeight = useMemo<number>(
+    () =>
+      items.reduce((w: number, i: CartItem) => w + (i.weight ?? 0) * i.qty, 0),
+    [items]
+  );
+
+  /* ---------------- TAX ---------------- */
   const tax = useMemo(() => {
     if (!config) return 0;
-    return calculateTax(totalPrice, config.defaultRegion) ?? 0;
-  }, [config, totalPrice]);
+    return calculateTax(total, config.defaultRegion) ?? 0;
+  }, [config, total]);
 
-  // Shipping logic
+  /* ---------------- SHIPPING ---------------- */
   useEffect(() => {
     if (!config) return;
-    if (!zip || zip.length < 4) {
-      setShipping(Number(config.defaultShippingPrice || 0));
+
+    if (subtotal >= Number(config.freeShippingThreshold || 999999)) {
+      setShipping(0);
       return;
     }
 
-    const prefix = zip.substring(0, 2);
+    const prefix = zip?.substring(0, 2);
     const zone = zones.find(
       (z) =>
         z.countries.includes(prefix) &&
@@ -118,19 +103,22 @@ export default function CartSummary({
         totalWeight <= (z.maxWeight || 999999)
     );
 
-    if (subtotal >= Number(config.freeShippingThreshold || 999999)) {
-      setShipping(0);
-    } else {
-      setShipping(Number(zone?.price ?? config.defaultShippingPrice ?? 0));
-    }
+    setShipping(Number(zone?.price ?? config.defaultShippingPrice ?? 0));
   }, [zip, zones, totalWeight, subtotal, config]);
 
-  // Grand Total (safe)
-  const grandTotal = useMemo(() => {
-    return (totalPrice || 0) + (tax || 0) + Number(shipping || 0);
-  }, [totalPrice, tax, shipping]);
+  const grandTotal = useMemo(
+    () => total + tax + shipping,
+    [total, tax, shipping]
+  );
 
-  /* -------------------- EARLY-UI RETURN (SAFE AFTER HOOKS) -------------------- */
+  /* ---------------- PROMO ---------------- */
+  const tryApplyPromo = () => {
+    const promo = config?.activePromos?.[promoInput];
+    if (!promo) return alert("Invalid promo code");
+
+    alert("Promo applied");
+  };
+
   if (!config) {
     return (
       <View style={styles.box}>
@@ -139,31 +127,12 @@ export default function CartSummary({
     );
   }
 
-  /* ----------------------------- RENDER UI ----------------------------- */
-  const tryApplyPromo = () => {
-    const promo = config.activePromos?.[promoInput];
-    if (!promo) return alert("Invalid promo");
-
-    const used = userData?.promoUsage?.[promoInput] ?? 0;
-
-    if (promo.maxUsagePerUser && used >= promo.maxUsagePerUser)
-      return alert("Usage limit reached.");
-
-    if (promo.maxTotalUses && promo.currentUses >= promo.maxTotalUses)
-      return alert("Promo expired.");
-
-    setCoupon(promo);
-    alert("Promo applied!");
-  };
-
   return (
     <View style={styles.box}>
       <Text style={styles.row}>Subtotal: ${subtotal.toFixed(2)}</Text>
 
-      {totalDiscount > 0 && (
-        <Text style={styles.saved}>
-          You saved ${totalDiscount.toFixed(2)} 🎉
-        </Text>
+      {discount > 0 && (
+        <Text style={styles.saved}>You saved ${discount.toFixed(2)} 🎉</Text>
       )}
 
       <View style={styles.promoRow}>

@@ -1,5 +1,3 @@
-// app/checkout/payment.tsx
-
 import {
   View,
   Text,
@@ -7,62 +5,69 @@ import {
   StyleSheet,
   Platform,
   Linking,
+  Alert,
 } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { useEffect } from "react";
 import { createCheckoutSession } from "../../api/orders";
-import { auth } from "@/src/services/firebase";
+import { auth, authReady } from "@/src/services/firebase";
 
 export default function PaymentScreen() {
   const { orderId } = useLocalSearchParams();
   const id = Array.isArray(orderId) ? orderId[0] : orderId;
 
   useEffect(() => {
+    let cancelled = false;
+
     async function startPayment() {
       try {
+        // ✅ CRITICAL: wait for auth persistence
+        await authReady;
+
         const user = auth.currentUser;
-
         if (!user) {
-          alert("Please sign in before paying.");
+          Alert.alert("Login required", "Please sign in before paying.");
           return;
         }
 
-        const session = await createCheckoutSession({
-          orderId: id!,
-          uid: user.uid,
-        });
+        const session = await createCheckoutSession(id!);
 
-        if (!session.url) {
-          alert("Payment session error");
-          return;
+        if (!session?.url) {
+          throw new Error("Stripe session missing URL");
         }
 
-        // WEB
         if (Platform.OS === "web") {
           window.location.href = session.url;
           return;
         }
 
-        // NATIVE
         const supported = await Linking.canOpenURL(session.url);
-        if (supported) {
-          await Linking.openURL(session.url);
-        } else {
-          alert("Cannot open payment link.");
+        if (!supported) {
+          throw new Error("Cannot open Stripe URL");
         }
-      } catch (err) {
-        console.error(err);
-        alert("Payment failed");
+
+        await Linking.openURL(session.url);
+      } catch (err: any) {
+        if (cancelled) return;
+
+        console.error("Payment error:", err);
+        Alert.alert(
+          "Payment failed",
+          err?.message || "Please recreate your order."
+        );
       }
     }
 
-    startPayment();
+    if (id) startPayment();
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   return (
     <View style={styles.center}>
       <ActivityIndicator size="large" />
-      <Text style={{ marginTop: 10 }}>Redirecting to payment...</Text>
+      <Text style={{ marginTop: 10 }}>Redirecting to payment…</Text>
     </View>
   );
 }

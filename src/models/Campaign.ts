@@ -1,4 +1,6 @@
 export interface Campaign {
+  scope: string;
+  type: string;
   id: string;
 
   title: string;

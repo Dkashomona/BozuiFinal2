@@ -4,25 +4,22 @@ import {
   Text,
   View,
   Platform,
-  useWindowDimensions,
   ScrollView,
   TouchableOpacity,
 } from "react-native";
 import { useState, useCallback } from "react";
-import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/src/store/authStore";
 
+import { Icon } from "@/src/components/icons/Icon";
 import SearchBar from "@/src/components/home/SearchBar";
 import CartIcon from "@/src/components/cart/CartIcon";
 import CampaignSlider from "@/src/components/home/CampaignSlider";
-import ProductFeed from "@/src/components/home/ProductFeed";
+import ProductFeed from "@/src/components/products/ProductFeed";
 
 export default function HomeScreen() {
   const { currentUser, role, loading } = useAuth();
   const name = currentUser?.displayName ?? "Guest";
-
   const isWeb = Platform.OS === "web";
-  useWindowDimensions();
 
   /* ---------------- FILTER STATES ---------------- */
   const [query, setQuery] = useState("");
@@ -41,7 +38,6 @@ export default function HomeScreen() {
   const handleMin = useCallback((v: number) => setMin(v), []);
   const handleMax = useCallback((v: number) => setMax(v), []);
 
-  /* ---------------- LOADING ---------------- */
   if (loading) {
     return (
       <View style={styles.center}>
@@ -50,11 +46,10 @@ export default function HomeScreen() {
     );
   }
 
-  /* ---------------- MAIN UI ---------------- */
   return (
     <View style={styles.page}>
-      {/* SEARCH BAR — LOWERED on Mobile */}
-      {Platform.OS === "web" ? (
+      {/* SEARCH BAR */}
+      {isWeb ? (
         <SearchBar
           onSearch={handleSearch}
           onCategory={handleCategory}
@@ -74,18 +69,11 @@ export default function HomeScreen() {
         </View>
       )}
 
-      {/* --------------------------------------
-           DELIVER TO + SIGN IN under search (Mobile Only)
-         -------------------------------------- */}
-      {Platform.OS !== "web" && (
+      {/* MOBILE INFO BAR */}
+      {!isWeb && (
         <View style={styles.mobileInfoRow}>
           <View style={{ flexDirection: "row", alignItems: "center" }}>
-            <Ionicons
-              name="location"
-              size={18}
-              color="#fff"
-              style={{ marginRight: 4 }}
-            />
+            <Icon name="location" size={18} color="#fff" />
             <Text style={styles.mobileDeliverText}>
               Deliver to{" "}
               {currentUser
@@ -102,22 +90,13 @@ export default function HomeScreen() {
         </View>
       )}
 
-      {/* --------------------------------------
-           DESKTOP / WEB HEADER
-         -------------------------------------- */}
+      {/* WEB HEADER */}
       {isWeb && (
         <View style={styles.header}>
           <View style={{ flexDirection: "row", alignItems: "center" }}>
-            <Ionicons
-              name="location-outline"
-              size={20}
-              color="white"
-              style={{ marginRight: 8 }}
-            />
-
+            <Icon name="location-outline" size={20} color="white" />
             <View>
               <Text style={styles.headerHello}>Hello, {name}</Text>
-
               {currentUser ? (
                 <Text style={styles.headerSub}>
                   Delivering to:{" "}
@@ -137,7 +116,7 @@ export default function HomeScreen() {
         </View>
       )}
 
-      {/* ADMIN BUTTON */}
+      {/* ADMIN */}
       {role === "admin" && (
         <TouchableOpacity
           style={styles.adminBtn}
@@ -147,24 +126,23 @@ export default function HomeScreen() {
         </TouchableOpacity>
       )}
 
-      {/* ---------------- WEB LAYOUT ---------------- */}
+      {/* CONTENT */}
       {isWeb ? (
         <ScrollView contentContainerStyle={{ paddingBottom: 100 }}>
           <CampaignSlider
             query={query}
             category={category}
             subcategory={subcategory}
-            min={min}
-            max={max}
+            min={min ?? undefined}
+            max={max ?? undefined}
           />
 
           <ProductFeed
-            isWeb
             query={query}
             category={category}
             subcategory={subcategory}
-            min={min}
-            max={max}
+            min={min ?? undefined}
+            max={max ?? undefined}
           />
         </ScrollView>
       ) : (
@@ -173,16 +151,16 @@ export default function HomeScreen() {
             query={query}
             category={category}
             subcategory={subcategory}
-            min={min}
-            max={max}
+            min={min ?? undefined}
+            max={max ?? undefined}
           />
 
           <ProductFeed
             query={query}
             category={category}
             subcategory={subcategory}
-            min={min}
-            max={max}
+            min={min ?? undefined}
+            max={max ?? undefined}
           />
         </>
       )}
@@ -193,18 +171,11 @@ export default function HomeScreen() {
 /* ---------------- STYLES ---------------- */
 
 const styles = StyleSheet.create({
-  page: {
-    flex: 1,
-    backgroundColor: "#f5f5f5",
-  },
-
-  /* SEARCH WRAPPER ON MOBILE (LOWERED) */
+  page: { flex: 1, backgroundColor: "#f5f5f5" },
   mobileSearchWrapper: {
-    marginTop: Platform.OS === "ios" ? 40 : 25, // LOWERED SEARCH BAR
+    marginTop: Platform.OS === "ios" ? 40 : 25,
     paddingHorizontal: 10,
   },
-
-  /* MOBILE: Deliver to + Sign-in */
   mobileInfoRow: {
     backgroundColor: "rgba(249, 22, 5, 1)",
     flexDirection: "row",
@@ -213,20 +184,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
-
   mobileDeliverText: {
     color: "#fff",
     fontSize: 14,
     fontWeight: "600",
+    marginLeft: 4,
   },
-
   mobileSignIn: {
     color: "#FFD814",
     fontSize: 14,
     fontWeight: "700",
   },
-
-  /* WEB HEADER */
   header: {
     backgroundColor: "#0f1111",
     paddingVertical: 14,
@@ -235,25 +203,13 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-
-  headerHello: {
-    color: "white",
-    fontSize: 17,
-    fontWeight: "700",
-  },
-
-  headerSub: {
-    color: "#d1d1d1",
-    fontSize: 13,
-  },
-
+  headerHello: { color: "white", fontSize: 17, fontWeight: "700" },
+  headerSub: { color: "#d1d1d1", fontSize: 13 },
   headerLoginLink: {
     color: "#87CEFA",
     fontSize: 13,
     textDecorationLine: "underline",
   },
-
-  /* ADMIN BUTTON */
   adminBtn: {
     alignSelf: "flex-end",
     backgroundColor: "#FFD814",
@@ -263,16 +219,6 @@ const styles = StyleSheet.create({
     marginRight: 14,
     marginTop: 4,
   },
-
-  adminText: {
-    fontWeight: "700",
-    color: "#111",
-  },
-
-  /* LOADING CENTER */
-  center: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  adminText: { fontWeight: "700", color: "#111" },
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
 });

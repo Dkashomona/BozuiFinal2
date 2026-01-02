@@ -1,6 +1,5 @@
-
 import React, { useEffect, useState } from "react";
-import CartButton from "../cart/CartButton"; 
+import CartButton from "../cart/CartButton";
 
 import {
   View,
@@ -15,12 +14,14 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../services/firebase";
 import { getCampaigns } from "../../services/campaignService";
 import { router } from "expo-router";
-import ProductQuickViewModal from "./ProductQuickViewModal"; 
+import ProductQuickViewModal from "./ProductQuickViewModal";
 
 export default function CampaignSectionList() {
   const [campaigns, setCampaigns] = useState<any[]>([]);
-  const [campaignProducts, setCampaignProducts] = useState<Record<string, any[]>>({});
-  const [quickViewProduct, setQuickViewProduct] = useState<any | null>(null); 
+  const [campaignProducts, setCampaignProducts] = useState<
+    Record<string, any[]>
+  >({});
+  const [quickViewProduct, setQuickViewProduct] = useState<any | null>(null);
   const { width } = useWindowDimensions();
   const CARD_WIDTH = width * 0.4;
 
@@ -60,7 +61,9 @@ export default function CampaignSectionList() {
                 onPress={() => setQuickViewProduct(p)}
               >
                 <Image
-                  source={{ uri: p.images?.[0] ?? "https://via.placeholder.com/150" }}
+                  source={{
+                    uri: p.images?.[0] ?? "https://via.placeholder.com/150",
+                  }}
                   style={styles.image}
                 />
                 <Text numberOfLines={2} style={styles.name}>
@@ -83,7 +86,10 @@ export default function CampaignSectionList() {
         onClose={() => setQuickViewProduct(null)}
         onViewFull={() => {
           if (quickViewProduct) {
-            router.push({ pathname: "/product/[id]", params: { id: quickViewProduct.id } });
+            router.push({
+              pathname: "/product/[id]",
+              params: { id: quickViewProduct.id },
+            });
             setQuickViewProduct(null);
           }
         }}

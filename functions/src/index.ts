@@ -1,27 +1,57 @@
 /* ===========================================================
-   FIREBASE STRIPE FUNCTIONS — TS-CLEAN VERSION
-   ✔ No Response return errors
-   ✔ Stripe checkout and payment sheet fixed
+   FIREBASE FUNCTIONS v2 — STRIPE + REVIEWS (FIXED VERSION)
 =========================================================== */
 
-import * as functions from "firebase-functions";
-import * as admin from "firebase-admin";
-import Stripe from "stripe";
 import cors from "cors";
+import Stripe from "stripe";
+import * as admin from "firebase-admin";
+
+import { defineSecret } from "firebase-functions/params";
+import { onRequest, onCall, HttpsError } from "firebase-functions/v2/https";
+import { onDocumentCreated, onDocumentWritten } from "firebase-functions/v2/firestore";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 
 admin.initializeApp();
 const db = admin.firestore();
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2023-10-16",
-});
-
 const corsHandler = cors({ origin: true });
 
-/* ---------------------------------------------------------
-   UTIL — GET OR CREATE CUSTOMER
---------------------------------------------------------- */
-async function getOrCreateCustomer(uid: string): Promise<string> {
+/* ===========================================================
+   SECRETS
+=========================================================== */
+const STRIPE_SECRET_KEY = defineSecret("STRIPE_SECRET_KEY");
+const STRIPE_WEBHOOK_SECRET = defineSecret("STRIPE_WEBHOOK_SECRET");
+
+/* ===========================================================
+   TYPES
+=========================================================== */
+type CartItem = {
+  id: string;
+  name: string;
+  qty: number;
+  price: number;        // base price (from Firestore ONLY)
+  size?: string;
+  color?: string;
+
+  unitPrice?: number;   // final price after campaigns
+  campaignId?: string;
+};
+
+function normalizeCountry(country?: string): string {
+  if (!country) return "US";
+
+  const c = country.toUpperCase().trim();
+
+  if (c === "USA" || c === "UNITED STATES" || c === "UNITED STATES OF AMERICA") {
+    return "US";
+  }
+
+  return c;
+}
+
+/* ===========================================================
+   UTIL — STRIPE CUSTOMER
+=========================================================== */
+async function getOrCreateCustomer(uid: string, stripe: Stripe) {
   const ref = db.collection("users").doc(uid);
   const snap = await ref.get();
 
@@ -30,302 +60,797 @@ async function getOrCreateCustomer(uid: string): Promise<string> {
   }
 
   const customer = await stripe.customers.create({ metadata: { uid } });
-
   await ref.set({ stripeCustomerId: customer.id }, { merge: true });
 
   return customer.id;
 }
 
+
 /* ---------------------------------------------------------
    UTIL — NOTIFY ADMINS
 --------------------------------------------------------- */
-async function sendAdminNotification(message: string): Promise<void> {
+async function sendAdminNotification(message: string) {
   const snap = await db.collection("admin_devices").get();
   if (snap.empty) return;
-
-  const payload = snap.docs.map((d) => ({
-    to: d.data().expoPushToken,
-    sound: "default",
-    title: "Admin Alert",
-    body: message,
-  }));
 
   await fetch("https://exp.host/--/api/v2/push/send", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(
+      snap.docs.map((d) => ({
+        to: d.data().expoPushToken,
+        title: "Bozuishop Admin",
+        body: message,
+        sound: "default",
+      }))
+    ),
   });
 }
 
-/* ---------------------------------------------------------
-   1) CREATE ORDER
---------------------------------------------------------- */
-export const createOrder = functions.https.onRequest((req, res) => {
-  corsHandler(req, res, async () => {
-    try {
-      const { items, amount, address, uid } = req.body;
 
-      if (!uid) {
-        res.status(400).json({ error: "Missing UID" });
-        return;
-      }
 
-      // ALWAYS SAVE AS CENTS
-      const amountInCents = Math.round(Number(amount) * 100);
 
-      const orderId = db.collection("orders").doc().id;
 
-      await db.collection("orders").doc(orderId).set({
-        orderId,
-        uid,
-        items,
-        amount: amountInCents,   // ← IMPORTANT
-        address,
-        status: "pending",
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        paymentIntentId: null,
-      });
 
-      res.json({ orderId });
-      return;
-    } catch (err: any) {
-      console.error("createOrder error:", err);
-      res.status(500).send(err.message);
-      return;
+/* ==========================================================
+   1) CREATE ORDER (HTTPS)
+========================================================== */
+
+export const createOrder = onCall(
+  { region: "us-central1" },
+  async (req) => {
+    const uid = req.auth?.uid;
+    if (!uid) {
+      throw new HttpsError("unauthenticated", "Login required");
     }
-  });
-});
+
+    const { items, address } = req.data;
+
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new HttpsError("invalid-argument", "Invalid items");
+    }
+
+    const country = normalizeCountry(address?.country);
+
+    const baseItems: CartItem[] = await Promise.all(
+      items.map(async (i: any) => {
+        if (typeof i.qty !== "number" || i.qty <= 0) {
+          throw new HttpsError("invalid-argument", "Invalid quantity");
+        }
+
+        const snap = await db.collection("products").doc(i.id).get();
+        if (!snap.exists) {
+          throw new HttpsError("not-found", "Product missing");
+        }
+
+        const price = snap.data()!.price;
+
+        return {
+          id: i.id,
+          name: snap.data()!.name,
+          qty: i.qty,
+          price,
+          unitPrice: price,
+        };
+      })
+    );
+
+    const campaign = await applyCampaigns(baseItems, uid);
+
+    const tax = calculateTax(campaign.total, country);
+    const shipping = calculateShipping(campaign.total);
+
+    const total = Math.round((campaign.total + tax + shipping) * 100) / 100;
+    const amount = Math.round(total * 100);
+
+    const ref = db.collection("orders").doc();
+
+    await ref.set({
+      orderId: ref.id,
+      uid,
+      address: { ...address, country },
+      items: campaign.items,
+      subtotal: campaign.subtotal,
+      discount: campaign.discount,
+      tax,
+      shipping,
+      total,
+      amount,
+      pricingLocked: true,
+      status: "pending",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    return { orderId: ref.id };
+  }
+);
 
 
-/* ---------------------------------------------------------
-   2) PAYMENT SHEET (MOBILE)
---------------------------------------------------------- */
-export const createPaymentSheet = functions.https.onCall(async (data, context) => {
-  const uid = context.auth?.uid;
-  if (!uid) throw new functions.https.HttpsError("unauthenticated", "Login required");
 
-  const { orderId } = data;
-  if (!orderId)
-    throw new functions.https.HttpsError("invalid-argument", "Missing orderId");
 
-  const snap = await db.collection("orders").doc(orderId).get();
-  if (!snap.exists)
-    throw new functions.https.HttpsError("not-found", "Order not found");
 
-  const order = snap.data()!;
-  const customerId = await getOrCreateCustomer(uid);
 
-  const ephemeralKey = await stripe.ephemeralKeys.create(
-    { customer: customerId },
-    { apiVersion: "2024-06-20" }
-  );
 
-  const pi = await stripe.paymentIntents.create({
-    amount: order.amount,
-    currency: "usd",
-    customer: customerId,
-    automatic_payment_methods: { enabled: true },
-    metadata: { orderId, uid },
-  });
 
-  await snap.ref.update({ paymentIntentId: pi.id });
 
-  return {
-    paymentIntent: pi.client_secret,
-    ephemeralKey: ephemeralKey.secret,
-    customer: customerId,
-  };
-});
 
-/* ---------------------------------------------------------
-   3) WEB CHECKOUT SESSION
---------------------------------------------------------- */
-export const createCheckoutSession = functions.https.onRequest((req, res) => {
-  corsHandler(req, res, async () => {
-    try {
-      const { orderId, uid } = req.body;
 
-      if (!orderId || !uid) {
-        res.status(400).send("Missing orderId or uid");
-        return;
-      }
 
-      const snap = await db.collection("orders").doc(orderId).get();
 
-      if (!snap.exists) {
-        res.status(404).send("Order not found");
-        return;
-      }
 
-      // ⭐ FIX: safely extract order data
-      const order = snap.data();
-      if (!order) {
-        res.status(500).send("Order data is missing");
-        return;
-      }
+/* ==========================================================
+   2) PREVENT DUPLICATE REVIEWS
+========================================================== */
+export const preventDuplicateReviews = onDocumentCreated(
+  "reviews/{reviewId}",
+  async (event) => {
+    const newReview = event.data?.data();
+    if (!newReview) return;
 
-      const items = order.items;
-      if (!items || items.length === 0) {
-        res.status(400).send("Order has no items");
-        return;
-      }
+    const { userId, productId } = newReview;
 
-      // ⭐ FIX: Validate each item & price
-      const lineItems = items.map((item: any) => {
-        const price = Number(item.price);
+    const existing = await db
+      .collection("reviews")
+      .where("userId", "==", userId)
+      .where("productId", "==", productId)
+      .get();
 
-        if (!price || isNaN(price)) {
-          console.error("Invalid price in item:", item);
-          throw new Error(`Invalid price for item ${item?.name ?? "Unnamed product"}`);
+    if (existing.size > 1) {
+      console.warn("Duplicate review deleted:", userId, productId);
+
+      await event.data?.ref.delete();
+
+      await db.collection("review_audit_logs").add({
+        type: "duplicate_blocked",
+        userId,
+        productId,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+    else {
+      // 🔔 Notify admins of new review
+      const productSnap = await db.collection("products").doc(productId).get();
+      const productName = productSnap.data()?.name || productId;
+      await sendAdminNotification(`New review submitted for ${productName} (${newReview.rating}⭐)`);
+    }
+  }
+);
+
+/* ==========================================================
+   3) PAYMENT SHEET
+========================================================== */
+export const createPaymentSheet = onCall(
+  {
+    region: "us-central1",
+    secrets: [STRIPE_SECRET_KEY],
+  },
+  async (req) => {
+    const stripe = new Stripe(STRIPE_SECRET_KEY.value());
+
+
+    const uid = req.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Login required");
+
+    const orderId = req.data.orderId;
+    if (!orderId)
+      throw new HttpsError("invalid-argument", "Missing orderId");
+
+    const snap = await db.collection("orders").doc(orderId).get();
+    if (!snap.exists)
+      throw new HttpsError("not-found", "Order not found");
+
+    const order = snap.data()!;
+
+    // ✔ MUST pass stripe because your function expects 2 args
+    const customerId = await getOrCreateCustomer(uid, stripe);
+
+    const ephemeralKey = await stripe.ephemeralKeys.create(
+      { customer: customerId },
+      { apiVersion: "2024-06-20" }
+    );
+
+    const pi = await stripe.paymentIntents.create({
+      amount: order.amount,
+      currency: "usd",
+      customer: customerId,
+      automatic_payment_methods: { enabled: true },
+      metadata: { orderId, uid },
+    });
+
+    await snap.ref.update({ paymentIntentId: pi.id });
+
+    return {
+      paymentIntent: pi.client_secret,
+      ephemeralKey: ephemeralKey.secret,
+      customer: customerId,
+    };
+  }
+);
+
+
+
+
+/* ===========================================================
+   4) WEB STRIPE CHECKOUT (MATCHES CART TOTAL)
+=========================================================== */
+export const createCheckoutSession = onCall(
+  {
+    region: "us-central1",
+    secrets: [STRIPE_SECRET_KEY],
+  },
+  async (req) => {
+    /* ==========================================================
+       AUTH
+    ========================================================== */
+    const uid = req.auth?.uid;
+    if (!uid) {
+      throw new HttpsError("unauthenticated", "Login required");
+    }
+
+    /* ==========================================================
+       INPUT VALIDATION
+    ========================================================== */
+    const { orderId } = req.data;
+    if (!orderId || typeof orderId !== "string") {
+      throw new HttpsError("invalid-argument", "Missing or invalid orderId");
+    }
+
+    /* ==========================================================
+       FETCH ORDER
+    ========================================================== */
+    const snap = await db.collection("orders").doc(orderId).get();
+    if (!snap.exists) {
+      throw new HttpsError("not-found", "Order not found");
+    }
+
+    const order = snap.data()!;
+
+    /* ==========================================================
+       OWNERSHIP CHECK
+    ========================================================== */
+    if (!order.uid) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Order is missing owner UID. Please recreate the order."
+      );
+    }
+
+    if (order.uid !== uid) {
+      throw new HttpsError("permission-denied", "Unauthorized access to order");
+    }
+
+    /* ==========================================================
+       PRICING INTEGRITY
+    ========================================================== */
+    if (
+      typeof order.amount !== "number" ||
+      typeof order.total !== "number" ||
+      order.amount <= 0 ||
+      order.total <= 0
+    ) {
+      console.error("INVALID ORDER PRICING", order);
+      throw new HttpsError(
+        "failed-precondition",
+        "Order pricing is invalid. Please recreate the order."
+      );
+    }
+
+    if (!Array.isArray(order.items) || order.items.length === 0) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Order has no items"
+      );
+    }
+
+    /* ==========================================================
+       STRIPE INIT (SAFE)
+    ========================================================== */
+    const stripe = new Stripe(STRIPE_SECRET_KEY.value(), {
+      apiVersion: "2025-12-15.clover",
+    });
+
+    /* ==========================================================
+       BUILD LINE ITEMS
+    ========================================================== */
+    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] =
+      order.items.map((item: any) => {
+        const unitPrice = item.unitPrice ?? item.price;
+
+        if (typeof unitPrice !== "number" || unitPrice <= 0) {
+          throw new HttpsError(
+            "failed-precondition",
+            "Invalid item pricing detected"
+          );
         }
 
         return {
-          quantity: item.qty ?? 1,
+          quantity: item.qty,
           price_data: {
             currency: "usd",
             product_data: {
-              name: item.name || "Product",
+              name: item.name,
             },
-            unit_amount: Math.round(price * 100), // convert to cents
+            unit_amount: Math.round(unitPrice * 100),
           },
         };
       });
 
-      const customerId = await getOrCreateCustomer(uid);
-
-      const session = await stripe.checkout.sessions.create({
-        mode: "payment",
-        customer: customerId,
-        metadata: { orderId, uid },
-        line_items: lineItems,
-        success_url: `http://localhost:8081/order/${orderId}`,
-        cancel_url: `http://localhost:8081/checkout/payment?cancel=1`,
+    if (order.tax > 0) {
+      lineItems.push({
+        quantity: 1,
+        price_data: {
+          currency: "usd",
+          product_data: { name: "Sales Tax" },
+          unit_amount: Math.round(order.tax * 100),
+        },
       });
-
-      res.json({ url: session.url });
-      return;
-
-    } catch (err: any) {
-      console.error("🔥 Stripe Checkout Error:", err);
-      res.status(500).json({ error: err.message });
-      return;
     }
-  });
-});
 
+    if (order.shipping > 0) {
+      lineItems.push({
+        quantity: 1,
+        price_data: {
+          currency: "usd",
+          product_data: { name: "Shipping" },
+          unit_amount: Math.round(order.shipping * 100),
+        },
+      });
+    }
 
-/* ---------------------------------------------------------
-   4) STRIPE WEBHOOK
---------------------------------------------------------- */
-export const stripeWebhook = functions.https.onRequest(async (req, res) => {
-  let event;
+    /* ==========================================================
+       ENV-SAFE REDIRECT URLS (FIXED)
+    ========================================================== */
+    const BASE_URL =
+      process.env.NODE_ENV === "production"
+        ? "https://bozuishopworld.web.app"
+        : "http://localhost:8081";
 
-  try {
-    event = stripe.webhooks.constructEvent(
-      req.rawBody,
-      req.headers["stripe-signature"] as string,
-      process.env.STRIPE_WEBHOOK_SECRET!
-    );
-  } catch (err: any) {
-    res.status(400).send(`Webhook error: ${err.message}`);
-    return;
-  }
-
-  async function markPaid(orderId: string) {
-    await db.collection("orders").doc(orderId).update({
-      status: "paid",
-      paidAt: admin.firestore.FieldValue.serverTimestamp(),
+    /* ==========================================================
+       CREATE STRIPE SESSION
+    ========================================================== */
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      line_items: lineItems,
+      metadata: {
+        orderId,
+        uid,
+      },
+      success_url: `${BASE_URL}/order/${orderId}`,
+      cancel_url: `${BASE_URL}/cart`,
     });
 
-    await sendAdminNotification(`💳 Order #${orderId} PAID`);
+    /* ==========================================================
+       RETURN
+    ========================================================== */
+    return {
+      url: session.url,
+    };
+  }
+);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* ==========================================================
+   5) STRIPE WEBHOOK
+========================================================== */
+export const stripeWebhook = onRequest(
+  { region: "us-central1", secrets: [STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET] },
+  async (req, res): Promise<void> => {
+    const stripe = new Stripe(STRIPE_SECRET_KEY.value());
+    let event;
+
+    try {
+      event = stripe.webhooks.constructEvent(
+        req.rawBody,
+        req.headers["stripe-signature"]!,
+        STRIPE_WEBHOOK_SECRET.value()
+      );
+    } catch (err: any) {
+      console.error("stripeWebhook signature error", err);
+      res.status(400).send("Invalid signature");
+      return;
+    }
+
+    const data: any = event.data.object;
+
+    // ✅ PAYMENT COMPLETED
+    if (event.type === "checkout.session.completed") {
+      const orderId = data.metadata.orderId;
+      const orderRef = db.collection("orders").doc(orderId);
+      const snap = await orderRef.get();
+
+      const firestoreTotal = snap.data()!.total;
+      const stripeTotal = data.amount_total / 100;
+
+      // 🔍 RECONCILIATION
+      if (firestoreTotal !== stripeTotal) {
+        await db.collection("order_discrepancies").add({
+          orderId,
+          firestoreTotal,
+          stripeTotal,
+          detectedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      await orderRef.update({
+        status: "paid",
+        paidAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
+    // 🔁 REFUND
+    if (event.type === "charge.refunded") {
+      const orderId = data.metadata?.orderId;
+      if (!orderId) {
+        res.json({ received: true });
+        return;
+      }
+
+      const ref = db.collection("orders").doc(orderId);
+      const snap = await ref.get();
+      if (!snap.exists) {
+        res.json({ received: true });
+        return;
+      }
+
+      const batch = db.batch();
+
+      for (const item of snap.data()!.items) {
+        batch.update(db.collection("products").doc(item.id), {
+          stock: admin.firestore.FieldValue.increment(item.qty),
+        });
+      }
+
+      batch.update(ref, {
+        status: "refunded",
+        refundedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      await batch.commit();
+    }
+
+    res.json({ received: true });
+    return;
+  }
+);
+
+
+
+
+
+
+
+
+/* ==========================================================
+   6) ADMIN PAYOUT
+========================================================== */
+export const createManualPayout = onCall(
+  { region: "us-central1", secrets: [STRIPE_SECRET_KEY] },
+  async (req) => {
+    const stripe = new Stripe(STRIPE_SECRET_KEY.value());
+
+
+    const uid = req.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Admin only");
+
+    const user = await db.collection("users").doc(uid).get();
+    if (user.data()?.role !== "admin")
+      throw new HttpsError("permission-denied", "Admins only");
+
+    const amount = req.data.amount;
+
+    const payout = await stripe.payouts.create({
+      amount,
+      currency: "usd",
+    });
+
+    return { payoutId: payout.id, status: payout.status };
+  }
+);
+
+/* ==========================================================
+   7) REFUND
+========================================================== */
+export const issueRefund = onCall(
+  { region: "us-central1", secrets: [STRIPE_SECRET_KEY] },
+  async (req) => {
+    const stripe = new Stripe(STRIPE_SECRET_KEY.value());
+
+
+    const uid = req.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Admin only");
+
+    const user = await db.collection("users").doc(uid).get();
+    if (user.data()?.role !== "admin")
+      throw new HttpsError("permission-denied", "Admins only");
+
+    const refund = await stripe.refunds.create({
+      payment_intent: req.data.paymentIntentId,
+    });
+
+    return { refundId: refund.id, status: refund.status };
+  }
+);
+
+/* ==========================================================
+   8) ADJUST STOCK
+========================================================== */
+export const adjustStock = onCall(
+  { region: "us-central1" },
+  async (req) => {
+    const uid = req.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Admin only");
+
+    const user = await db.collection("users").doc(uid).get();
+    if (user.data()?.role !== "admin")
+      throw new HttpsError("permission-denied", "Admins only");
+
+    const { productId, change } = req.data;
+
+    const ref = db.collection("products").doc(productId);
+    const snap = await ref.get();
+
+    const newStock = (snap.data()?.stock || 0) + change;
+    await ref.update({ stock: newStock });
+
+    return { newStock };
+  }
+);
+
+/* ==========================================================
+   9) UPDATE PRODUCT RATING
+========================================================== */
+export const updateProductRating = onDocumentWritten(
+  "reviews/{reviewId}",
+  async (event) => {
+    const after = event.data?.after?.data();
+    if (!after) return;
+
+    const productId = after.productId;
+
+    const reviewsSnap = await db
+      .collection("reviews")
+      .where("productId", "==", productId)
+      .get();
+
+    const reviews = reviewsSnap.docs.map((d) => d.data());
+    const count = reviews.length;
+    const avg =
+      count === 0
+        ? 0
+        : reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / count;
+
+    await db.collection("products").doc(productId).update({
+      averageRating: avg,
+      reviewCount: count,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+);
+
+/* ==========================================================
+   10) ADMIN REPLY TO REVIEW
+========================================================== */
+export const replyToReview = onRequest(
+  { region: "us-central1" },
+  async (req, res): Promise<void> => {
+    corsHandler(req, res, async () => {
+      try {
+        if (req.method === "OPTIONS") {
+          res.set("Access-Control-Allow-Origin", "*");
+          res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+          res.set(
+            "Access-Control-Allow-Headers",
+            "Content-Type, Authorization"
+          );
+          res.status(204).send("");
+          return;
+        }
+
+        res.set("Access-Control-Allow-Origin", "*");
+
+        const authHeader = req.headers.authorization;
+        if (!authHeader) {
+          res.status(401).json({ error: "Missing Authorization header" });
+          return;
+        }
+
+        const idToken = authHeader.split(" ")[1];
+        const decoded = await admin.auth().verifyIdToken(idToken);
+
+        const userSnap = await db.collection("users").doc(decoded.uid).get();
+        if (userSnap.data()?.role !== "admin") {
+          res.status(403).json({ error: "Admins only" });
+          return;
+        }
+
+        const { reviewId, replyText } = req.body;
+
+        await db.collection("reviews").doc(reviewId).update({
+          sellerReply: replyText,
+          repliedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        res.json({ success: true });
+      } catch (err: any) {
+        console.error("replyToReview ERROR:", err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+    return;
+  }
+);
+/* ==========================================================
+   11) Ai
+========================================================== */
+export { generateProductDescription } from "./ai";
+/* ==========================================================
+   AUTO-DISABLE EXPIRED CAMPAIGNS
+========================================================== */
+export const expireCampaigns = onSchedule(
+  { schedule: "every 5 minutes", region: "us-central1" },
+  async () => {
+    const now = Date.now();
+    const snap = await db.collection("campaigns").where("active", "==", true).get();
+    const batch = db.batch();
+
+    snap.forEach(doc => {
+      const c = doc.data();
+      if (c.type === "FLASH_SALE" && c.config?.endAt && now > Number(c.config.endAt)) {
+        batch.update(doc.ref, { active: false });
+      }
+    });
+
+    await batch.commit();
+  }
+);
+/* ===========================================================
+   UTIL — APPLY CAMPAIGNS (SERVER SOURCE OF TRUTH)
+=========================================================== */
+async function applyCampaigns(items: CartItem[], uid: string) {
+  const snap = await db.collection("campaigns").where("active", "==", true).get();
+
+  let subtotal = items.reduce((s, i) => s + i.price * i.qty, 0);
+  let discount = 0;
+  let updated = items.map(i => ({ ...i }));
+
+  for (const doc of snap.docs) {
+    const c = doc.data();
+    const applicable = updated.filter(i => c.productIds?.includes(i.id));
+
+    if (applicable.length === 0 && c.type !== "SPEND_AND_SAVE") continue;
+
+    switch (c.type) {
+      case "FLASH_SALE":
+      case "BUY_X_GET_Y_PERCENT":
+        applicable.forEach(i => {
+          discount += i.price * i.qty * (c.config.discountPercent / 100);
+          i.campaignId = doc.id;
+        });
+        break;
+
+      case "FIRST_PURCHASE_DISCOUNT": {
+        const prev = await db
+          .collection("orders")
+          .where("uid", "==", uid)
+          .where("status", "==", "paid")
+          .limit(1)
+          .get();
+        if (prev.empty) {
+          discount += subtotal * (c.config.discountPercent / 100);
+        }
+        break;
+      }
+
+      case "SPEND_AND_SAVE":
+        if (subtotal >= c.config.minAmount) {
+          discount += c.config.discountAmount;
+        }
+        break;
+    }
   }
 
-  switch (event.type) {
-    case "checkout.session.completed":
-      await markPaid((event.data.object as any).metadata.orderId);
-      break;
-
-    case "payment_intent.succeeded":
-      await markPaid((event.data.object as any).metadata.orderId);
-      break;
+  if (discount > 0) {
+    const ratio = (subtotal - discount) / subtotal;
+    updated = updated.map(i => ({
+      ...i,
+      unitPrice: Math.round(i.price * ratio * 100) / 100,
+    }));
+  } else {
+    updated = updated.map(i => ({ ...i, unitPrice: i.price }));
   }
 
-  res.json({ received: true });
-  return;
-});
+  const finalTotal = updated.reduce(
+    (s, i) => s + (i.unitPrice ?? i.price) * i.qty,
+    0
+  );
 
-/* ---------------------------------------------------------
-   5) ADMIN PAYOUT
---------------------------------------------------------- */
-export const createManualPayout = functions.https.onCall(async (data, context) => {
-  const uid = context.auth?.uid;
-  if (!uid) throw new functions.https.HttpsError("unauthenticated", "Admin only");
+  return {
+    items: updated,
+    subtotal,
+    discount,
+    total: Math.round(finalTotal * 100) / 100,
+  };
+}
 
-  const user = await db.collection("users").doc(uid).get();
-  if (user.data()?.role !== "admin")
-    throw new functions.https.HttpsError("permission-denied", "Admins only");
 
-  const { amount } = data;
-  if (!amount || amount <= 0)
-    throw new functions.https.HttpsError("invalid-argument", "Invalid amount");
 
-  const payout = await stripe.payouts.create({
-    amount,
-    currency: "usd",
-  });
 
-  return { payoutId: payout.id, status: payout.status };
-});
 
-/* ---------------------------------------------------------
-   6) REFUND
---------------------------------------------------------- */
-export const issueRefund = functions.https.onCall(async (data, context) => {
-  const uid = context.auth?.uid;
-  if (!uid) throw new functions.https.HttpsError("unauthenticated", "Admin only");
 
-  const user = await db.collection("users").doc(uid).get();
-  if (user.data()?.role !== "admin")
-    throw new functions.https.HttpsError("permission-denied", "Admins only");
 
-  const { paymentIntentId } = data;
-  if (!paymentIntentId)
-    throw new functions.https.HttpsError("invalid-argument", "Missing paymentIntentId");
 
-  const refund = await stripe.refunds.create({
-    payment_intent: paymentIntentId,
-  });
+/* ===========================================================
+   UTIL — VERIFY & RESERVE STOCK (TRANSACTION)
+=========================================================== */
 
-  return { refundId: refund.id, status: refund.status };
-});
+function calculateShipping(subtotal: number): number {
+  // Free shipping over $50
+  return subtotal >= 50 ? 0 : 5.99;
+}
 
-/* ---------------------------------------------------------
-   7) ADJUST STOCK
---------------------------------------------------------- */
-export const adjustStock = functions.https.onCall(async (data, context) => {
-  const uid = context.auth?.uid;
-  if (!uid) throw new functions.https.HttpsError("unauthenticated", "Admin only");
+function calculateTax(amount: number, country?: string): number {
+  const normalized = normalizeCountry(country);
 
-  const user = await db.collection("users").doc(uid).get();
-  if (user.data()?.role !== "admin")
-    throw new functions.https.HttpsError("permission-denied", "Admins only");
+  if (normalized === "US") {
+    return Math.round(amount * 0.07 * 100) / 100; // 7% US tax
+  }
 
-  const { productId, change } = data;
+  return 0;
+}
+/* ==========================================================
+   ADMIN — BACKFILL ORDERS
+========================================================== */
+export const backfillOrders = onCall(
+  { region: "us-central1" },
+  async (req) => {
+    const uid = req.auth?.uid;
+    if (!uid) {
+      throw new HttpsError("unauthenticated", "Admin only");
+    }
 
-  const ref = db.collection("products").doc(productId);
-  const snap = await ref.get();
+    const userSnap = await db.collection("users").doc(uid).get();
+    if (userSnap.data()?.role !== "admin") {
+      throw new HttpsError("permission-denied", "Admins only");
+    }
 
-  const newStock = (snap.data()?.stock || 0) + change;
+    const snap = await db.collection("orders").get();
+    let updated = 0;
 
-  await ref.update({ stock: newStock });
+    for (const d of snap.docs) {
+      const o = d.data();
 
-  await db.collection("inventory_logs").add({
-    productId,
-    change,
-    newStock,
-    admin: uid,
-    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-  });
+      if (!o.amount && typeof o.total === "number") {
+        await d.ref.update({
+          subtotal: o.subtotal ?? o.total,
+          tax: o.tax ?? 0,
+          shipping: o.shipping ?? 0,
+          discount: o.discount ?? 0,
+          amount: Math.round(o.total * 100),
+        });
+        updated++;
+      }
+    }
 
-  return { newStock };
-});
+    return { updated };
+  }
+);

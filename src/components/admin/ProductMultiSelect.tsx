@@ -1,15 +1,19 @@
 import { collection, getDocs } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { db } from "../../services/firebase";
+
+type Props = {
+  selected: string[];
+  onChange: (x: string[]) => void;
+  search?: string;
+};
 
 export default function ProductMultiSelect({
   selected,
   onChange,
-}: {
-  selected: string[];
-  onChange: (x: string[]) => void;
-}) {
+  search = "",
+}: Props) {
   const [products, setProducts] = useState<any[]>([]);
 
   useEffect(() => {
@@ -30,34 +34,53 @@ export default function ProductMultiSelect({
     }
   }
 
+  /* --------------------------------------------------
+     SEARCH FILTER (PREMIUM & SAFE)
+  -------------------------------------------------- */
+  const filteredProducts = useMemo(() => {
+    if (!search.trim()) return products;
+    return products.filter((p) =>
+      p.name?.toLowerCase().includes(search.toLowerCase())
+    );
+  }, [products, search]);
+
   return (
     <View style={{ marginTop: 20 }}>
       <Text style={{ fontWeight: "bold", fontSize: 16 }}>Select Products</Text>
 
       <ScrollView style={{ maxHeight: 250, marginTop: 10 }}>
-        {products.map((p) => (
-          <TouchableOpacity
-            key={p.id}
-            onPress={() => toggle(p.id)}
-            style={{
-              padding: 12,
-              backgroundColor: selected.includes(p.id)
-                ? "#4A90E2"
-                : "#eee",
-              marginBottom: 10,
-              borderRadius: 10,
-            }}
-          >
-            <Text
+        {filteredProducts.map((p) => {
+          const active = selected.includes(p.id);
+          return (
+            <TouchableOpacity
+              key={p.id}
+              onPress={() => toggle(p.id)}
               style={{
-                color: selected.includes(p.id) ? "white" : "#333",
-                fontWeight: "bold",
+                padding: 12,
+                backgroundColor: active ? "#0F172A" : "#F1F5F9",
+                marginBottom: 10,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: active ? "#0F172A" : "#E5E7EB",
               }}
             >
-              {p.name}
-            </Text>
-          </TouchableOpacity>
-        ))}
+              <Text
+                style={{
+                  color: active ? "#fff" : "#111827",
+                  fontWeight: "700",
+                }}
+              >
+                {p.name}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+
+        {filteredProducts.length === 0 && (
+          <Text style={{ marginTop: 12, color: "#6B7280" }}>
+            No products found
+          </Text>
+        )}
       </ScrollView>
     </View>
   );

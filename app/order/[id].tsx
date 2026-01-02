@@ -5,6 +5,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
+  Platform,
 } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
 import { useEffect, useState } from "react";
@@ -14,44 +15,59 @@ import AdminHeader from "@/src/components/admin/AdminHeader";
 import { useAuth } from "@/src/store/authStore";
 
 export default function OrderDetails() {
-  const { id } = useLocalSearchParams();
-  const orderId = Array.isArray(id) ? id[0] : id;
-
+  const params = useLocalSearchParams();
   const { currentUser } = useAuth();
-  const [role, setRole] = useState("customer");
-  const [order, setOrder] = useState<any>(null);
 
-  // Load user role
+  const [orderId, setOrderId] = useState<string | null>(null);
+  const [order, setOrder] = useState<any>(null);
+  const [role, setRole] = useState<"admin" | "customer">("customer");
+  const [loading, setLoading] = useState(true);
+
+  // Normalize route param (WEB SAFE)
   useEffect(() => {
-    async function loadRole() {
-      if (!currentUser) return;
-      const snap = await getDoc(doc(db, "users", currentUser.uid));
-      if (snap.exists()) {
-        setRole(snap.data().role === "admin" ? "admin" : "customer");
+    const raw = params?.id;
+    if (Array.isArray(raw)) setOrderId(raw[0]);
+    else if (typeof raw === "string") setOrderId(raw);
+  }, [params]);
+
+  // Load role
+  useEffect(() => {
+    if (!currentUser) return;
+
+    getDoc(doc(db, "users", currentUser.uid)).then((snap) => {
+      if (snap.exists() && snap.data().role === "admin") {
+        setRole("admin");
       }
-    }
-    loadRole();
+    });
   }, [currentUser]);
 
   // Load order
   useEffect(() => {
-    async function loadOrder() {
-      if (!orderId) return;
-      const snap = await getDoc(doc(db, "orders", orderId));
+    if (!orderId) return;
+
+    setLoading(true);
+    getDoc(doc(db, "orders", orderId)).then((snap) => {
       if (snap.exists()) setOrder(snap.data());
-    }
-    loadOrder();
+      setLoading(false);
+    });
   }, [orderId]);
 
-  if (!order) {
+  if (loading) {
     return (
       <View style={styles.center}>
-        <Text>Loading order...</Text>
+        <Text>Loading order…</Text>
       </View>
     );
   }
 
-  // Status → style mapping (TS-safe)
+  if (!order) {
+    return (
+      <View style={styles.center}>
+        <Text>Order not found</Text>
+      </View>
+    );
+  }
+
   const statusStyleMap: Record<string, any> = {
     pending: styles.pending,
     paid: styles.paid,
@@ -62,14 +78,14 @@ export default function OrderDetails() {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#fff" }}>
-      {/* ⭐ ADMIN sees standard header */}
-      {role === "admin" ? (
-        <AdminHeader title="Order Details" backTo="/admin" />
-      ) : (
-        /* ⭐ CUSTOMER sees a big beautiful HOME button */
+      {/* ADMIN HEADER (WEB ONLY) */}
+      {role === "admin" && <AdminHeader title="Order Details" />}
+
+      {/* CUSTOMER HEADER (WEB ONLY) */}
+      {Platform.OS === "web" && role !== "admin" && (
         <View style={styles.customerHeader}>
           <TouchableOpacity
-            onPress={() => router.push("/")}
+            onPress={() => router.replace("/")}
             style={styles.homeButton}
           >
             <Text style={styles.homeButtonText}>🏠 Home</Text>
@@ -80,52 +96,46 @@ export default function OrderDetails() {
       )}
 
       <ScrollView style={styles.page}>
-        {/* TOP ORDER CARD */}
         <View style={styles.card}>
           <Text style={styles.label}>Order ID</Text>
           <Text style={styles.value}>{orderId}</Text>
 
-          <Text
-            style={[styles.statusBadge, statusStyleMap[order.status] || {}]}
-          >
+          <Text style={[styles.statusBadge, statusStyleMap[order.status]]}>
             {order.status.toUpperCase()}
           </Text>
         </View>
 
-        {/* ITEMS */}
         <Text style={styles.sectionTitle}>Items</Text>
 
-        {order.items?.map((item: any, index: number) => {
-          const imageUrl =
-            item.image || "https://via.placeholder.com/150?text=No+Image";
+        {order.items?.map((item: any, index: number) => (
+          <View key={index} style={styles.itemCard}>
+            <Image
+              source={
+                item.image
+                  ? { uri: item.image }
+                  : require("../../assets/images/icon.png")
+              }
+              style={styles.itemImage}
+            />
 
-          return (
-            <View key={index} style={styles.itemCard}>
-              <Image source={{ uri: imageUrl }} style={styles.itemImage} />
-
-              <View style={{ flex: 1 }}>
-                <Text style={styles.itemName}>{item.name}</Text>
-
-                <Text style={styles.itemQty}>
-                  Qty: {item.qty} × ${item.price.toFixed(2)}
-                </Text>
-
-                <Text style={styles.itemTotal}>
-                  ${(item.qty * item.price).toFixed(2)}
-                </Text>
-              </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.itemName}>{item.name}</Text>
+              <Text style={styles.itemQty}>
+                Qty: {item.qty} × ${item.price.toFixed(2)}
+              </Text>
+              <Text style={styles.itemTotal}>
+                ${(item.qty * item.price).toFixed(2)}
+              </Text>
             </View>
-          );
-        })}
+          </View>
+        ))}
 
-        {/* TOTAL */}
         <Text style={styles.sectionTitle}>Total</Text>
         <Text style={styles.total}>${order.total.toFixed(2)}</Text>
 
-        {/* TRACK ORDER */}
         <TouchableOpacity
           style={styles.trackButton}
-          onPress={() => router.push(`/order/tracking?orderId=${orderId}`)}
+          onPress={() => router.replace(`/order/tracking?orderId=${orderId}`)}
         >
           <Text style={styles.trackText}>TRACK ORDER</Text>
         </TouchableOpacity>
@@ -134,12 +144,13 @@ export default function OrderDetails() {
   );
 }
 
+/* ===========================
+   STYLES
+=========================== */
 const styles = StyleSheet.create({
   page: { flex: 1, padding: 20 },
-
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
 
-  /** CUSTOMER HEADER */
   customerHeader: {
     backgroundColor: "#e67e22",
     paddingTop: 50,
@@ -150,20 +161,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
-  headerTitle: {
-    color: "white",
-    fontSize: 22,
-    fontWeight: "800",
-  },
+  headerTitle: { color: "white", fontSize: 22, fontWeight: "800" },
 
   homeButton: {
     backgroundColor: "white",
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 12,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    elevation: 5,
   },
 
   homeButtonText: {
@@ -176,9 +180,6 @@ const styles = StyleSheet.create({
     backgroundColor: "white",
     padding: 18,
     borderRadius: 14,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
     marginBottom: 20,
   },
 
@@ -213,9 +214,6 @@ const styles = StyleSheet.create({
     backgroundColor: "white",
     padding: 14,
     borderRadius: 14,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
     marginBottom: 15,
   },
 

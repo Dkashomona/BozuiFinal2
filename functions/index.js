@@ -1,23 +1,38 @@
-// Import Firebase Functions SDK
-const functions = require("firebase-functions");
+import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { defineSecret } from "firebase-functions/params";
+import Stripe from "stripe";
 
-// Import Stripe SDK with your secret key
-const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const STRIPE_SECRET_KEY = defineSecret("STRIPE_SECRET_KEY");
 
-// Define the callable function
-exports.createPaymentIntent = functions.https.onCall(async (data, context) => {
-  // Convert amount to cents
-  const amount = Math.round(data.amount * 100);
+export const createPaymentIntent = onCall(
+  {
+    region: "us-central1",
+    secrets: [STRIPE_SECRET_KEY],
+  },
+  async (req) => {
+    const stripeSecret = req.secrets?.STRIPE_SECRET_KEY;
+    if (!stripeSecret) {
+      throw new HttpsError("failed-precondition", "Missing Stripe secret.");
+    }
 
-  // Create a PaymentIntent
-  const paymentIntent = await stripe.paymentIntents.create({
-    amount,
-    currency: "usd",
-    automatic_payment_methods: { enabled: true },
-  });
+    const stripe = new Stripe(stripeSecret, {
+      apiVersion: "2023-10-16",
+    });
 
-  // Return client secret to client
-  return {
-    clientSecret: paymentIntent.client_secret,
-  };
-});
+    if (!req.data?.amount) {
+      throw new HttpsError("invalid-argument", "Missing amount");
+    }
+
+    const amount = Math.round(Number(req.data.amount) * 100);
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount,
+      currency: "usd",
+      automatic_payment_methods: { enabled: true },
+    });
+
+    return {
+      clientSecret: paymentIntent.client_secret,
+    };
+  }
+);

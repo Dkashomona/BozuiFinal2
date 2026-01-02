@@ -1,108 +1,57 @@
 // api/orders.ts
 
-import { auth , functions } from "../src/services/firebase";
+import { functions, auth } from "@/src/services/firebase";
 import { CartItem } from "@/src/store/cartStore";
-
-/* ----------------------------------------------------------
-   2) MOBILE PAYMENT SHEET (Callable)
------------------------------------------------------------*/
 import { httpsCallable } from "firebase/functions";
 
-/* ----------------------------------------------------------
-   1) CREATE ORDER  (REST Endpoint)
------------------------------------------------------------*/
-export async function createOrder(
-  items: CartItem[],
-  amount: number,
-  address: any
-) {
+/* ==========================================================
+   INTERNAL: ENSURE AUTH TOKEN IS FRESH
+========================================================== */
+async function ensureAuth() {
   const user = auth.currentUser;
+  if (!user) {
+    throw new Error("User not authenticated");
+  }
 
-  if (!user) throw new Error("User not logged in");
-
-  const payload = {
-    userId: user.uid,
-    items,
-    amount,
-    address,
-  };
-
-  const res = await fetch(
-    "https://us-central1-bozuishopworld.cloudfunctions.net/createOrder",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }
-  );
-
-  if (!res.ok) throw new Error("Failed to create order");
-
-  return await res.json(); // { orderId }
+  // Force token refresh to avoid stale auth on Web
+  await user.getIdToken(true);
 }
 
+/* ==========================================================
+   1) CREATE ORDER (CALLABLE — SERVER IS SOURCE OF TRUTH)
+========================================================== */
+export async function createOrder(
+  items: CartItem[],
+  address: any
+) {
+  await ensureAuth();
 
+  const fn = httpsCallable(functions, "createOrder");
+  const res = await fn({ items, address });
+
+  return res.data as { orderId: string };
+}
+
+/* ==========================================================
+   2) MOBILE PAYMENT SHEET (CALLABLE)
+========================================================== */
 export async function createPaymentSheet(params: { orderId: string }) {
+  await ensureAuth();
+
   const fn = httpsCallable(functions, "createPaymentSheet");
-  const res: any = await fn(params);
+  const res = await fn(params);
+
   return res.data;
 }
 
-/* ----------------------------------------------------------
-   3) WEB CHECKOUT SESSION (Stripe Checkout)
-   Used by /checkout/payment.tsx
------------------------------------------------------------*/
-export async function createCheckoutSession(params: { orderId: string; uid: string })  {
-  const user = auth.currentUser;
+/* ==========================================================
+   3) WEB STRIPE CHECKOUT (CALLABLE — CORRECT)
+========================================================== */
+export async function createCheckoutSession(orderId: string) {
+  await ensureAuth();
 
-  if (!user) {
-    throw new Error("User not logged in");
-  }
+  const fn = httpsCallable(functions, "createCheckoutSession");
+  const res = await fn({ orderId });
 
-  const payload = {
-    orderId: params.orderId,
-    uid: user.uid,
-  };
-
-  const res = await fetch(
-    "https://us-central1-bozuishopworld.cloudfunctions.net/createCheckoutSession",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }
-  );
-
-  if (!res.ok) {
-    console.error(await res.text());
-    throw new Error("Failed to create checkout session");
-  }
-
-  return await res.json(); // { url }
-}
-
-/* ----------------------------------------------------------
-   4) Direct Version — if you want to bypass authStore/params
------------------------------------------------------------*/
-export async function createCheckoutSessionDirect(orderId: string) {
-  const user = auth.currentUser;
-
-  if (!user) {
-    throw new Error("User not logged in");
-  }
-
-  const payload = { orderId, uid: user.uid };
-
-  const res = await fetch(
-    "https://us-central1-bozuishopworld.cloudfunctions.net/createCheckoutSession",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }
-  );
-
-  if (!res.ok) throw new Error("Failed to create checkout session");
-
-  return await res.json(); // { url }
+  return res.data as { url: string };
 }

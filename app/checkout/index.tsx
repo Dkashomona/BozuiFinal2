@@ -1,9 +1,8 @@
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
-import { useAuth } from "../../src/store/authStore";
-import { useCartStore } from "../../src/store/cartStore";
-import { collection, addDoc } from "firebase/firestore";
-import { db } from "../../src/services/firebase";
+import { useAuth } from "@/src/store/authStore";
+import { useCartStore } from "@/src/store/cartStore";
 import { router } from "expo-router";
+import { createOrder } from "@/api/orders";
 
 export default function CheckoutScreen() {
   const { currentUser, uid } = useAuth();
@@ -46,28 +45,18 @@ export default function CheckoutScreen() {
 
   async function startOrder() {
     try {
-      // 1️⃣ Calculate total
-      const total = items.reduce((sum, item) => {
-        const price = Number(item.price) || 0;
-        return sum + price * item.qty;
-      }, 0);
+      console.log("CALLING createOrder");
 
-      // 2️⃣ Create Firestore order
-      const orderRef = await addDoc(collection(db, "orders"), {
-        userId: uid,
-        items,
-        total,
-        amount: Math.round(total * 100), // Stripe needs amount in cents
-        address: currentUser.address,
-        status: "pending",
-        createdAt: Date.now(),
-      });
+      const res = await createOrder(items, currentUser.address);
 
-      // 3️⃣ Navigate to payment
-      router.push(`/checkout/payment?orderId=${orderRef.id}`);
-    } catch (err) {
+      if (!res?.orderId) {
+        throw new Error("Order creation failed");
+      }
+
+      router.push(`/checkout/payment?orderId=${res.orderId}`);
+    } catch (err: any) {
       console.error("Order creation failed:", err);
-      alert("Failed to create order");
+      alert(err.message || "Failed to create order");
     }
   }
 
