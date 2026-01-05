@@ -1,6 +1,16 @@
 import { router } from "expo-router";
 import React, { useState } from "react";
-import { Button, Image, Text, TextInput, View } from "react-native";
+import {
+  View,
+  Text,
+  TextInput,
+  Image,
+  Button,
+  StyleSheet,
+  Platform,
+} from "react-native";
+
+import AdminHeader from "../../../src/components/admin/AdminHeader";
 import { addCategory } from "../../../src/services/categoryService";
 import { uploadImageAsync } from "../../../src/services/uploadService";
 import { pickImage } from "../../../src/utils/pickImage";
@@ -15,7 +25,7 @@ export default function AddCategoryScreen() {
   }
 
   async function save() {
-    if (!name) return alert("Category name required");
+    if (!name.trim()) return alert("Category name required");
     if (!icon) return alert("Pick an icon");
 
     const id = Date.now().toString();
@@ -29,33 +39,64 @@ export default function AddCategoryScreen() {
   }
 
   return (
-    <View style={{ padding: 20 }}>
-      <Text style={{ fontSize: 22, fontWeight: "bold" }}>
-        Create New Category
-      </Text>
+    <View style={styles.page}>
+      {/* ✅ ADMIN HEADER */}
+      <AdminHeader title="Create Category" />
 
-      <TextInput
-        placeholder="Category Name"
-        value={name}
-        onChangeText={setName}
-        style={{
-          borderWidth: 1,
-          borderColor: "#ccc",
-          padding: 10,
-          marginVertical: 20,
-          borderRadius: 8,
-        }}
-      />
+      <View style={styles.content}>
+        <Text style={styles.title}>Create New Category</Text>
 
-      <Button title="Pick Icon" onPress={pickIcon} />
-      {icon && (
-        <Image
-          source={{ uri: icon }}
-          style={{ width: 120, height: 120, marginTop: 20 }}
+        <TextInput
+          placeholder="Category Name"
+          value={name}
+          onChangeText={setName}
+          style={styles.input}
         />
-      )}
 
-      <Button title="Save Category" onPress={save} />
+        <Button title="Pick Icon" onPress={pickIcon} />
+
+        {icon && (
+          <Image
+            source={{ uri: icon }}
+            style={styles.preview}
+            resizeMode="contain"
+          />
+        )}
+
+        <View style={{ marginTop: 20 }}>
+          <Button title="Save Category" onPress={save} />
+        </View>
+      </View>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  page: {
+    flex: 1,
+    backgroundColor: "#f4f6f8",
+  },
+  content: {
+    padding: 20,
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: "800",
+    marginBottom: 16,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#ccc",
+    padding: 12,
+    marginBottom: 20,
+    borderRadius: 10,
+    backgroundColor: "#fff",
+  },
+  preview: {
+    width: 120,
+    height: 120,
+    marginTop: 20,
+    borderRadius: 12,
+    alignSelf: "center",
+  },
+});

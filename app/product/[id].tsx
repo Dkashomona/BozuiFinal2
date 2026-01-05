@@ -14,6 +14,8 @@ import ProductGalleryPremium from "@/src/components/products/ProductGallery";
 import ProductSpecs from "@/src/components/products/ProductSpecs";
 import ReviewList from "@/src/components/reviews/ReviewList";
 import CreateReview from "@/src/components/reviews/CreateReview";
+import WhatsAppHelpButton from "@/src/components/products/WhatsAppHelpButton";
+
 import If from "@/src/components/common/If";
 
 import { db, auth } from "@/src/services/firebase";
@@ -219,6 +221,16 @@ export default function ProductPage() {
       <TouchableOpacity style={styles.cartBtn} onPress={handleAdd}>
         <Text style={styles.cartTxt}>Add to Cart</Text>
       </TouchableOpacity>
+
+      <WhatsAppHelpButton
+        product={{
+          id: product.id,
+          name: product.name,
+          price: Number(product.price),
+        }}
+        color={color}
+        size={size}
+      />
 
       <ProductSpecs product={product} />
 

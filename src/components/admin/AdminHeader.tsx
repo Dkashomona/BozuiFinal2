@@ -7,14 +7,15 @@ import {
   Platform,
 } from "react-native";
 import { router } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "@/src/components/icons/Icon";
 
 type Props = {
   title: string;
+  isDashboard?: boolean;
 };
 
 export default function AdminHeader({ title }: Props) {
-  // 🚫 NEVER render on native
+  // 🚫 Admin header is WEB-ONLY by design
   if (Platform.OS !== "web") return null;
 
   return (
@@ -23,13 +24,14 @@ export default function AdminHeader({ title }: Props) {
         onPress={() => router.replace("/admin")}
         style={styles.backBtn}
       >
-        <Ionicons name="chevron-back" size={26} color="white" />
+        <Icon name="chevron-back" size={26} color="white" />
       </TouchableOpacity>
 
       <Text style={styles.title} numberOfLines={1}>
         {title}
       </Text>
 
+      {/* Spacer for symmetry */}
       <View style={{ width: 26 }} />
     </View>
   );
@@ -48,11 +50,9 @@ const styles = StyleSheet.create({
     top: 0,
     zIndex: 100,
   },
-
   backBtn: {
     padding: 6,
   },
-
   title: {
     color: "white",
     fontSize: 20,

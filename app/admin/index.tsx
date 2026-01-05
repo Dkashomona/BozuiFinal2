@@ -136,6 +136,13 @@ const cards: {
   },
 
   {
+    title: "WhatsApp Settings",
+    emoji: "💬",
+    route: "/admin/settings/WhatsAppSettings",
+    roles: ["admin"],
+  },
+
+  {
     title: "Review Moderation",
     emoji: "📝",
     route: "/admin/reviews",
@@ -191,6 +198,18 @@ export default function AdminDashboard() {
       {/* HOME ICON IN HEADER (DASHBOARD ONLY) */}
       <AdminHeader title="Admin Dashboard" isDashboard />
 
+      {/* 🔥 FLOATING HOME BUTTON */}
+      <Pressable
+        onPress={() => router.replace("/(tabs)")}
+        style={({ pressed }) => [
+          styles.homeBtn,
+          pressed && styles.homeBtnPressed,
+        ]}
+      >
+        <Text style={styles.homeIcon}>🏠</Text>
+        <Text style={styles.homeText}>Home</Text>
+      </Pressable>
+
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.grid}>
           {cards
@@ -239,6 +258,41 @@ const styles = StyleSheet.create({
     transform: [{ translateY: -6 }],
     shadowOpacity: 0.25,
     shadowRadius: 14,
+  },
+  homeBtn: {
+    position: "fixed", // web
+    top: 20,
+    right: 20,
+    zIndex: 1000,
+
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+
+    backgroundColor: "#111",
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+
+  homeBtnPressed: {
+    transform: [{ scale: 0.96 }],
+    opacity: 0.9,
+  },
+
+  homeIcon: {
+    fontSize: 18,
+  },
+
+  homeText: {
+    color: "white",
+    fontWeight: "700",
+    fontSize: 14,
   },
 
   emoji: {

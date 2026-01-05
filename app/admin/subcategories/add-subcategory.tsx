@@ -1,7 +1,16 @@
 import { router } from "expo-router";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { useState } from "react";
-import { Button, ScrollView, Text, TextInput, View } from "react-native";
+import {
+  View,
+  Text,
+  TextInput,
+  Button,
+  ScrollView,
+  StyleSheet,
+} from "react-native";
+
+import AdminHeader from "../../../src/components/admin/AdminHeader";
 import CategoryDropdown from "../../../src/components/admin/CategoryDropdown";
 import { db } from "../../../src/services/firebase";
 
@@ -14,48 +23,80 @@ export default function AddSubcategoryPage() {
     if (!name.trim()) return alert("Name required");
     if (!categoryId) return alert("Category required");
 
-    setSaving(true);
+    try {
+      setSaving(true);
 
-    await addDoc(collection(db, "subcategories"), {
-      name,
-      categoryId,
-      createdAt: serverTimestamp(),
-    });
+      await addDoc(collection(db, "subcategories"), {
+        name,
+        categoryId,
+        createdAt: serverTimestamp(),
+      });
 
-    setSaving(false);
-    alert("Subcategory created!");
-    router.back();
+      alert("Subcategory created!");
+      router.back();
+    } catch (err) {
+      console.error(err);
+      alert("Failed to create subcategory");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <ScrollView style={{ padding: 20 }}>
-      <Text style={{ fontSize: 22, fontWeight: "bold" }}>Add Subcategory</Text>
+    <View style={styles.page}>
+      {/* ✅ ADMIN HEADER */}
+      <AdminHeader title="Add Subcategory" />
 
-      <Text style={{ marginTop: 20 }}>Name</Text>
-      <TextInput
-        value={name}
-        onChangeText={setName}
-        placeholder="Men"
-        style={input}
-      />
-
-      <CategoryDropdown value={categoryId} onChange={setCategoryId} />
-
-      <View style={{ marginTop: 20 }}>
-        <Button
-          title={saving ? "Saving..." : "💾 Save"}
-          onPress={save}
-          disabled={saving}
+      <ScrollView contentContainerStyle={styles.content}>
+        <Text style={styles.label}>Name</Text>
+        <TextInput
+          value={name}
+          onChangeText={setName}
+          placeholder="Men"
+          style={styles.input}
         />
-      </View>
-    </ScrollView>
+
+        <CategoryDropdown value={categoryId} onChange={setCategoryId} />
+
+        <View style={{ marginTop: 24 }}>
+          <Button
+            title={saving ? "Saving..." : "💾 Save"}
+            onPress={save}
+            disabled={saving}
+          />
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
-const input = {
-  borderWidth: 1,
-  borderColor: "#ccc",
-  padding: 10,
-  borderRadius: 8,
-  marginVertical: 10,
-};
+/* --------------------------------------------------
+   STYLES
+-------------------------------------------------- */
+const styles = StyleSheet.create({
+  page: {
+    flex: 1,
+    backgroundColor: "#f4f6f8",
+  },
+  content: {
+    padding: 20,
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: "800",
+    marginBottom: 20,
+  },
+  label: {
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 16,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#ccc",
+    padding: 12,
+    borderRadius: 10,
+    marginTop: 6,
+    backgroundColor: "#fff",
+  },
+});

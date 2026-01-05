@@ -5,6 +5,7 @@ import { auth, db } from "../../src/services/firebase";
 import { doc, getDoc } from "firebase/firestore";
 import { router } from "expo-router";
 
+import AdminHeader from "../../src/components/admin/AdminHeader";
 import AdminReviewDashboard from "../../src/components/admin/reviews/AdminReviewDashboard";
 
 export default function AdminReviewsScreen() {
@@ -52,6 +53,9 @@ export default function AdminReviewsScreen() {
 
   return (
     <View style={{ flex: 1 }}>
+      {/* ✅ ADMIN HEADER */}
+      <AdminHeader title="Review Moderation" />
+
       <AdminReviewDashboard />
     </View>
   );

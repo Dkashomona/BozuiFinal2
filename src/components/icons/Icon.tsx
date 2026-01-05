@@ -1,6 +1,9 @@
 import { Platform, Text } from "react-native";
 import React from "react";
 
+/* --------------------------------------------------
+   ICON NAMES (STRICT + COMPLETE)
+-------------------------------------------------- */
 export type IconName =
   | "home"
   | "home-outline"
@@ -11,7 +14,11 @@ export type IconName =
   | "person"
   | "person-outline"
   | "location"
-  | "location-outline";
+  | "location-outline"
+  | "search"
+  | "options-outline"
+  | "swap-vertical-outline"
+  | "chevron-back";
 
 type Props = {
   name: IconName;
@@ -19,13 +26,17 @@ type Props = {
   color?: string;
 };
 
-// Load Ionicons ONLY on native
+/* --------------------------------------------------
+   LOAD IONICONS (NATIVE ONLY)
+-------------------------------------------------- */
 let Ionicons: any;
 if (Platform.OS !== "web") {
   Ionicons = require("@expo/vector-icons/Ionicons").default;
 }
 
-// Emoji fallback for web (NO FONTS)
+/* --------------------------------------------------
+   WEB ICON FALLBACK (NO FONTS)
+-------------------------------------------------- */
 const WEB_ICONS: Record<IconName, string> = {
   home: "🏠",
   "home-outline": "🏠",
@@ -37,16 +48,32 @@ const WEB_ICONS: Record<IconName, string> = {
   "person-outline": "👤",
   location: "📍",
   "location-outline": "📍",
+  search: "🔍",
+  "options-outline": "≡",
+  "swap-vertical-outline": "⇅",
+  "chevron-back": "←",
 };
 
+/* --------------------------------------------------
+   ICON COMPONENT
+-------------------------------------------------- */
 export function Icon({ name, size = 20, color = "#000" }: Props) {
+  // 🌐 WEB — emoji fallback (no fonts, no crashes)
   if (Platform.OS === "web") {
     return (
-      <Text style={{ fontSize: size, color, lineHeight: size + 2 }}>
+      <Text
+        style={{
+          fontSize: size,
+          color,
+          lineHeight: size + 2,
+          textAlign: "center",
+        }}
+      >
         {WEB_ICONS[name]}
       </Text>
     );
   }
 
+  // 📱 NATIVE — Ionicons
   return <Ionicons name={name} size={size} color={color} />;
 }

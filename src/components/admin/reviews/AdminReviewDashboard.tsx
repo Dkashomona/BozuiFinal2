@@ -187,8 +187,6 @@ export default function AdminReviewDashboard() {
   ---------------------------------------------------------- */
   return (
     <ScrollView style={styles.page} contentContainerStyle={{ padding: 16 }}>
-      <Text style={styles.header}>Review Moderation</Text>
-
       {/* SEARCH */}
       <TextInput
         placeholder="Search reviews..."

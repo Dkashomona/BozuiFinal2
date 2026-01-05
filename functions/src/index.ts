@@ -99,71 +99,121 @@ async function sendAdminNotification(message: string) {
 export const createOrder = onCall(
   { region: "us-central1" },
   async (req) => {
+    /* ==========================================================
+       AUTH
+    ========================================================== */
     const uid = req.auth?.uid;
     if (!uid) {
       throw new HttpsError("unauthenticated", "Login required");
     }
 
+    /* ==========================================================
+       INPUT
+    ========================================================== */
     const { items, address } = req.data;
-
     if (!Array.isArray(items) || items.length === 0) {
       throw new HttpsError("invalid-argument", "Invalid items");
     }
 
     const country = normalizeCountry(address?.country);
 
-    const baseItems: CartItem[] = await Promise.all(
+    /* ==========================================================
+       SNAPSHOT PRODUCTS (IMMUTABLE ORDER ITEMS)
+    ========================================================== */
+    const baseItems = await Promise.all(
       items.map(async (i: any) => {
-        if (typeof i.qty !== "number" || i.qty <= 0) {
-          throw new HttpsError("invalid-argument", "Invalid quantity");
-        }
-
         const snap = await db.collection("products").doc(i.id).get();
         if (!snap.exists) {
           throw new HttpsError("not-found", "Product missing");
         }
 
-        const price = snap.data()!.price;
+        const product = snap.data()!;
 
         return {
           id: i.id,
-          name: snap.data()!.name,
+          name: product.name,
+          image: product.images?.[0] ?? null, // ✅ FIX: SNAPSHOT IMAGE
           qty: i.qty,
-          price,
-          unitPrice: price,
+          price: product.price,
+          unitPrice: product.price,
         };
       })
     );
 
+    /* ==========================================================
+       APPLY CAMPAIGNS (SERVER SOURCE OF TRUTH)
+    ========================================================== */
     const campaign = await applyCampaigns(baseItems, uid);
 
+    /* ==========================================================
+       TOTALS
+    ========================================================== */
     const tax = calculateTax(campaign.total, country);
     const shipping = calculateShipping(campaign.total);
-
     const total = Math.round((campaign.total + tax + shipping) * 100) / 100;
     const amount = Math.round(total * 100);
 
-    const ref = db.collection("orders").doc();
+    const orderRef = db.collection("orders").doc();
 
-    await ref.set({
-      orderId: ref.id,
-      uid,
-      address: { ...address, country },
-      items: campaign.items,
-      subtotal: campaign.subtotal,
-      discount: campaign.discount,
-      tax,
-      shipping,
-      total,
-      amount,
-      pricingLocked: true,
-      status: "pending",
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    /* ==========================================================
+       TRANSACTION
+    ========================================================== */
+    await db.runTransaction(async (tx) => {
+      // 🔐 VERIFY STOCK
+      for (const item of campaign.items) {
+        const productRef = db.collection("products").doc(item.id);
+        const snap = await tx.get(productRef);
+
+        const stock = snap.data()?.stock ?? 0;
+        if (stock < item.qty) {
+          throw new HttpsError(
+            "failed-precondition",
+            `Out of stock: ${snap.data()?.name}`
+          );
+        }
+      }
+
+      // 🔻 DECREMENT STOCK + LOG
+      for (const item of campaign.items) {
+        tx.update(db.collection("products").doc(item.id), {
+          stock: admin.firestore.FieldValue.increment(-item.qty),
+        });
+
+        tx.set(db.collection("inventory_logs").doc(), {
+          productId: item.id,
+          change: -item.qty,
+          reason: "order_created",
+          orderId: orderRef.id,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      // 🧾 CREATE ORDER (SNAPSHOT)
+      tx.set(orderRef, {
+        orderId: orderRef.id,
+        uid,
+        address: { ...address, country },
+        items: campaign.items,
+        subtotal: campaign.subtotal,
+        discount: campaign.discount,
+        tax,
+        shipping,
+        total,
+        amount,
+        status: "pending",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
     });
 
-    return { orderId: ref.id };
+    /* ==========================================================
+       RETURN
+    ========================================================== */
+    return { orderId: orderRef.id };
   }
 );
+
+
+
 
 
 
@@ -336,14 +386,11 @@ export const createCheckoutSession = onCall(
     }
 
     if (!Array.isArray(order.items) || order.items.length === 0) {
-      throw new HttpsError(
-        "failed-precondition",
-        "Order has no items"
-      );
+      throw new HttpsError("failed-precondition", "Order has no items");
     }
 
     /* ==========================================================
-       STRIPE INIT (SAFE)
+       STRIPE INIT
     ========================================================== */
     const stripe = new Stripe(STRIPE_SECRET_KEY.value(), {
       apiVersion: "2025-12-15.clover",
@@ -398,12 +445,12 @@ export const createCheckoutSession = onCall(
     }
 
     /* ==========================================================
-       ENV-SAFE REDIRECT URLS (FIXED)
+       ✅ CORRECT REDIRECT ORIGIN (THIS IS THE FIX)
     ========================================================== */
-    const BASE_URL =
-      process.env.NODE_ENV === "production"
-        ? "https://bozuishopworld.web.app"
-        : "http://localhost:8081";
+    const origin =
+      req.rawRequest?.headers?.origin ||
+      req.rawRequest?.headers?.referer?.split("/").slice(0, 3).join("/") ||
+      "https://bozuishopworld.web.app";
 
     /* ==========================================================
        CREATE STRIPE SESSION
@@ -415,8 +462,8 @@ export const createCheckoutSession = onCall(
         orderId,
         uid,
       },
-      success_url: `${BASE_URL}/order/${orderId}`,
-      cancel_url: `${BASE_URL}/cart`,
+      success_url: `${origin}/order/${orderId}`,
+      cancel_url: `${origin}/cart`,
     });
 
     /* ==========================================================
@@ -427,6 +474,7 @@ export const createCheckoutSession = onCall(
     };
   }
 );
+
 
 
 
