@@ -6,22 +6,40 @@ import {
   ActivityIndicator,
   StyleSheet,
   ScrollView,
+  TouchableOpacity,
+  TextInput,
 } from "react-native";
-import { db } from "../../src/services/firebase";
-import { doc, onSnapshot, updateDoc, getDoc } from "firebase/firestore";
+import { doc, onSnapshot, collection, query, where } from "firebase/firestore";
 import { Ionicons } from "@expo/vector-icons";
-import * as Notifications from "expo-notifications";
+
+import { db } from "../../src/services/firebase";
 import { useAuth } from "@/src/store/authStore";
-
-// ✅ Correct AdminHeader import
 import AdminHeader from "../../src/components/admin/AdminHeader";
+import { requestRefund } from "@/src/services/refundService";
 
+/* ----------------------------------
+   TRACKING STEPS
+---------------------------------- */
 const STEPS = [
   { key: "pending", label: "Order Placed", icon: "clipboard-outline" },
   { key: "paid", label: "Payment Confirmed", icon: "card-outline" },
   { key: "processing", label: "Preparing Order", icon: "hammer-outline" },
   { key: "shipped", label: "Shipped", icon: "cube-outline" },
   { key: "delivered", label: "Delivered", icon: "checkmark-circle-outline" },
+
+  {
+    key: "refund_requested",
+    label: "Refund Requested",
+    icon: "return-up-back-outline",
+    refund: true,
+  },
+  {
+    key: "refund_processing",
+    label: "Refund Processing",
+    icon: "time-outline",
+    refund: true,
+  },
+  { key: "refunded", label: "Refunded", icon: "cash-outline", refund: true },
 ];
 
 export default function TrackingScreen() {
@@ -29,25 +47,20 @@ export default function TrackingScreen() {
   const id = Array.isArray(orderId) ? orderId[0] : orderId;
 
   const { currentUser } = useAuth();
-  const [isAdmin, setIsAdmin] = useState(false);
 
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // 🔐 Determine if logged-in user is admin
-  useEffect(() => {
-    async function loadRole() {
-      if (!currentUser) return;
+  /* REFUND STATE */
+  const [refund, setRefund] = useState<any | null>(null);
+  const [refundLoading, setRefundLoading] = useState(true);
+  const [showRefundForm, setShowRefundForm] = useState(false);
+  const [refundReason, setRefundReason] = useState("");
+  const [submittingRefund, setSubmittingRefund] = useState(false);
 
-      const snap = await getDoc(doc(db, "users", currentUser.uid));
-      if (snap.exists()) {
-        setIsAdmin(snap.data().role === "admin");
-      }
-    }
-    loadRole();
-  }, [currentUser]);
-
-  // 🔴 Real-time order updates
+  /* ----------------------------------
+     LOAD ORDER (REAL-TIME)
+  ---------------------------------- */
   useEffect(() => {
     if (!id) return;
 
@@ -61,43 +74,95 @@ export default function TrackingScreen() {
     return unsub;
   }, [id]);
 
-  // 📲 Send push notification
-  const sendNotification = async (title: string, body: string) => {
-    if (!order?.pushToken) return;
-    await Notifications.scheduleNotificationAsync({
-      content: { title, body },
-      trigger: null,
+  /* ----------------------------------
+     LOAD REFUND (REAL-TIME)
+  ---------------------------------- */
+  useEffect(() => {
+    if (!currentUser || !id) return;
+
+    const q = query(
+      collection(db, "refundRequests"),
+      where("orderId", "==", id),
+      where("userId", "==", currentUser.uid)
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
+      if (!snap.empty) {
+        setRefund({ id: snap.docs[0].id, ...snap.docs[0].data() });
+      } else {
+        setRefund(null);
+      }
+      setRefundLoading(false);
     });
-  };
 
-  // 🛠 Admin updates order status
-  const updateStatus = async (newStatus: string) => {
-    if (!id || !isAdmin) return;
+    return unsub;
+  }, [currentUser, id]);
 
-    await updateDoc(doc(db, "orders", id), {
-      status: newStatus,
-      updatedAt: new Date(),
-    });
-
-    sendNotification("Order Update", `Your order is now: ${newStatus}`);
-  };
-
+  /* ----------------------------------
+     LOADING
+  ---------------------------------- */
   if (loading || !order) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color="#e67e22" />
-        <Text style={{ marginTop: 10 }}>Loading Tracking...</Text>
+        <Text style={{ marginTop: 10 }}>Loading tracking…</Text>
       </View>
     );
   }
 
-  const currentStep = STEPS.findIndex((s) => s.key === order.status);
-  const progress = (currentStep + 1) / STEPS.length;
+  /* ----------------------------------
+     PROGRESS
+  ---------------------------------- */
+  const fulfillmentIndex = STEPS.findIndex((s) => s.key === order.status);
+  const deliveryIndex = STEPS.findIndex((s) => s.key === "delivered");
 
+  const progressIndex = refund
+    ? deliveryIndex
+    : fulfillmentIndex === -1
+      ? 0
+      : fulfillmentIndex;
+
+  const progress = (progressIndex + 1) / STEPS.length;
+
+  /* ----------------------------------
+     REFUND RULES (FINAL)
+  ---------------------------------- */
+  const canRequestRefund =
+    !refundLoading &&
+    !refund &&
+    !!order.paymentIntentId && // 🔐 REQUIRED
+    ["paid", "shipped", "delivered"].includes(order.status);
+
+  async function submitRefundRequest() {
+    if (!id || !currentUser) return;
+
+    setSubmittingRefund(true);
+    try {
+      await requestRefund({
+        orderId: id,
+        reason: refundReason,
+      });
+      setShowRefundForm(false);
+    } finally {
+      setSubmittingRefund(false);
+    }
+  }
+
+  /* ----------------------------------
+     BUTTON LABEL
+  ---------------------------------- */
+  let refundLabel = "REQUEST A REFUND";
+  if (refund?.status === "pending") refundLabel = "REFUND REQUESTED";
+  if (refund?.status === "processing") refundLabel = "REFUND PROCESSING";
+  if (refund?.status === "refunded") refundLabel = "REFUNDED";
+  if (refund?.status === "rejected") refundLabel = "REFUND REJECTED";
+
+  /* ----------------------------------
+     RENDER
+  ---------------------------------- */
   return (
     <View style={{ flex: 1, backgroundColor: "#fff" }}>
-      {/* 🟧 Sticky Orange Header */}
-      <AdminHeader title="Order Tracking" backTo={`/order/${id}`} />
+      <AdminHeader title="Order Tracking" />
 
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.orderId}>Order ID: {order.id}</Text>
@@ -110,59 +175,84 @@ export default function TrackingScreen() {
         </View>
 
         {/* TIMELINE */}
-        {STEPS.map((step, index) => {
-          const isCompleted = index <= currentStep;
-          const isActive = order.status === step.key;
+        {STEPS.map((step) => {
+          const completed = step.refund
+            ? refund?.status && step.key.includes(refund.status)
+            : STEPS.findIndex((s) => s.key === step.key) <= fulfillmentIndex;
 
           return (
             <View key={step.key} style={styles.stepContainer}>
               <Ionicons
                 name={step.icon as any}
                 size={30}
-                color={isCompleted ? "#4CAF50" : "#aaa"}
+                color={completed ? "#16a34a" : "#aaa"}
                 style={styles.icon}
               />
-
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={[
-                    styles.stepLabel,
-                    isCompleted && styles.completedStep,
-                  ]}
-                >
-                  {step.label}
-                </Text>
-
-                {isActive && (
-                  <Text style={styles.activeNote}>In progress…</Text>
-                )}
-              </View>
+              <Text style={[styles.stepLabel, completed && styles.completed]}>
+                {step.label}
+              </Text>
             </View>
           );
         })}
 
-        {/* ADMIN CONTROLS */}
-        {isAdmin && (
-          <>
-            <Text style={styles.adminTitle}>Admin Controls</Text>
-
-            {STEPS.map((s) => (
-              <View key={s.key} style={styles.adminButtonWrapper}>
-                <Text
-                  style={styles.adminButton}
-                  onPress={() => updateStatus(s.key)}
-                >
-                  Set {s.label}
-                </Text>
-              </View>
-            ))}
-          </>
+        {/* STRIPE WARNING */}
+        {!order.paymentIntentId && (
+          <View style={styles.warningBox}>
+            <Text style={styles.warningText}>
+              ⚠ This order was not paid via Stripe and cannot be refunded.
+            </Text>
+          </View>
         )}
+
+        {/* REFUND SECTION */}
+        <View style={{ marginTop: 30 }}>
+          {canRequestRefund ? (
+            !showRefundForm ? (
+              <TouchableOpacity
+                onPress={() => setShowRefundForm(true)}
+                style={styles.requestRefundButton}
+              >
+                <Text style={styles.requestRefundText}>REQUEST A REFUND</Text>
+              </TouchableOpacity>
+            ) : (
+              <>
+                <Text style={styles.refundLabel}>Reason (optional)</Text>
+                <TextInput
+                  value={refundReason}
+                  onChangeText={setRefundReason}
+                  multiline
+                  style={styles.refundInput}
+                />
+                <TouchableOpacity
+                  disabled={submittingRefund}
+                  onPress={submitRefundRequest}
+                  style={[
+                    styles.confirmRefundButton,
+                    submittingRefund && { opacity: 0.6 },
+                  ]}
+                >
+                  <Text style={styles.confirmRefundText}>
+                    {submittingRefund
+                      ? "SUBMITTING…"
+                      : "CONFIRM REFUND REQUEST"}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )
+          ) : (
+            <TouchableOpacity disabled style={styles.disabledRefundButton}>
+              <Text style={styles.disabledRefundText}>{refundLabel}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </ScrollView>
     </View>
   );
 }
 
+/* ===========================
+   STYLES
+=========================== */
 const styles = StyleSheet.create({
   container: { padding: 20 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
@@ -187,30 +277,60 @@ const styles = StyleSheet.create({
     marginBottom: 25,
   },
   icon: { marginRight: 15 },
-
   stepLabel: { fontSize: 20, color: "#777" },
-  completedStep: { color: "#4CAF50", fontWeight: "bold" },
+  completed: { fontWeight: "700", color: "#16a34a" },
 
-  activeNote: { color: "#4CAF50", fontSize: 14 },
-
-  adminTitle: {
-    marginTop: 35,
-    fontSize: 22,
-    fontWeight: "bold",
-    marginBottom: 10,
-  },
-
-  adminButtonWrapper: {
-    marginVertical: 4,
-    backgroundColor: "#e67e22",
-    padding: 12,
+  warningBox: {
+    backgroundColor: "#fdecea",
+    padding: 14,
     borderRadius: 10,
+    marginTop: 20,
+  },
+  warningText: { color: "#c0392b", fontWeight: "700" },
+
+  requestRefundButton: {
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  requestRefundText: {
+    color: "#c0392b",
+    fontWeight: "700",
+    fontSize: 16,
   },
 
-  adminButton: {
+  disabledRefundButton: {
+    backgroundColor: "#eee",
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  disabledRefundText: {
+    color: "#777",
+    fontWeight: "700",
+  },
+
+  refundLabel: { marginBottom: 6, fontWeight: "600" },
+  refundInput: {
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 10,
+    padding: 12,
+    minHeight: 80,
+    marginBottom: 12,
+  },
+
+  confirmRefundButton: {
+    backgroundColor: "#c0392b",
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  confirmRefundText: {
     color: "white",
-    fontWeight: "bold",
-    textAlign: "center",
+    fontWeight: "700",
     fontSize: 16,
   },
 });

@@ -6,13 +6,19 @@ import {
   TouchableOpacity,
   Image,
   Platform,
+  TextInput,
 } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
 import { useEffect, useState } from "react";
 import { db } from "@/src/services/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  onSnapshot, // ✅ REQUIRED
+} from "firebase/firestore";
 import AdminHeader from "@/src/components/admin/AdminHeader";
 import { useAuth } from "@/src/store/authStore";
+import { requestRefund } from "@/src/services/refundService";
 
 export default function OrderDetails() {
   const params = useLocalSearchParams();
@@ -23,14 +29,24 @@ export default function OrderDetails() {
   const [role, setRole] = useState<"admin" | "customer">("customer");
   const [loading, setLoading] = useState(true);
 
-  // Normalize route param (WEB SAFE)
+  /* REFUND STATE (REAL-TIME) */
+  const [refund, setRefund] = useState<any | null>(null);
+  const [refundLoading, setRefundLoading] = useState(true);
+  const [refundReason, setRefundReason] = useState("");
+  const [requestingRefund, setRequestingRefund] = useState(false);
+
+  /* -----------------------------
+     NORMALIZE PARAM
+  ----------------------------- */
   useEffect(() => {
     const raw = params?.id;
     if (Array.isArray(raw)) setOrderId(raw[0]);
     else if (typeof raw === "string") setOrderId(raw);
   }, [params]);
 
-  // Load role
+  /* -----------------------------
+     LOAD ROLE
+  ----------------------------- */
   useEffect(() => {
     if (!currentUser) return;
 
@@ -41,7 +57,30 @@ export default function OrderDetails() {
     });
   }, [currentUser]);
 
-  // Load order
+  /* -----------------------------
+     LIVE REFUND LISTENER
+  ----------------------------- */
+  useEffect(() => {
+    if (!currentUser || !orderId) return;
+
+    const refundId = `${currentUser.uid}_${orderId}`;
+    const refundRef = doc(db, "refundRequests", refundId);
+
+    const unsub = onSnapshot(refundRef, (snap) => {
+      if (snap.exists()) {
+        setRefund({ id: snap.id, ...snap.data() });
+      } else {
+        setRefund(null);
+      }
+      setRefundLoading(false);
+    });
+
+    return unsub;
+  }, [currentUser, orderId]);
+
+  /* -----------------------------
+     LOAD ORDER
+  ----------------------------- */
   useEffect(() => {
     if (!orderId) return;
 
@@ -52,6 +91,9 @@ export default function OrderDetails() {
     });
   }, [orderId]);
 
+  /* -----------------------------
+     LOADING / ERROR
+  ----------------------------- */
   if (loading) {
     return (
       <View style={styles.center}>
@@ -68,27 +110,48 @@ export default function OrderDetails() {
     );
   }
 
-  const statusStyleMap: Record<string, any> = {
-    pending: styles.pending,
-    paid: styles.paid,
-    processing: styles.processing,
-    shipped: styles.shipped,
-    delivered: styles.delivered,
-  };
+  /* -----------------------------
+     REFUND ELIGIBILITY
+  ----------------------------- */
+  const canRequestRefund =
+    role === "customer" &&
+    !!order.paymentIntentId &&
+    ["paid", "delivered"].includes(order.status) &&
+    !refund &&
+    order.status !== "refunded";
 
+  /* -----------------------------
+     SUBMIT REFUND
+  ----------------------------- */
+  async function handleRequestRefund() {
+    if (!orderId) return;
+
+    setRequestingRefund(true);
+    try {
+      await requestRefund({
+        orderId,
+        reason: refundReason,
+      });
+      setRefundReason("");
+    } finally {
+      setRequestingRefund(false);
+    }
+  }
+
+  /* -----------------------------
+     RENDER
+  ----------------------------- */
   return (
     <View style={{ flex: 1, backgroundColor: "#fff" }}>
-      {/* ADMIN HEADER (WEB ONLY) */}
       {role === "admin" && <AdminHeader title="Order Details" />}
 
-      {/* CUSTOMER HEADER (WEB ONLY) */}
       {Platform.OS === "web" && role !== "admin" && (
         <View style={styles.customerHeader}>
           <TouchableOpacity
             onPress={() => router.replace("/")}
             style={styles.homeButton}
           >
-            <Text style={styles.homeButtonText}>🏠 Home</Text>
+            <Text style={styles.homeButtonText}>Home</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Order Details</Text>
           <View style={{ width: 60 }} />
@@ -99,14 +162,11 @@ export default function OrderDetails() {
         <View style={styles.card}>
           <Text style={styles.label}>Order ID</Text>
           <Text style={styles.value}>{orderId}</Text>
-
-          <Text style={[styles.statusBadge, statusStyleMap[order.status]]}>
-            {order.status.toUpperCase()}
-          </Text>
+          <Text style={styles.statusBadge}>{order.status.toUpperCase()}</Text>
         </View>
 
+        {/* ITEMS */}
         <Text style={styles.sectionTitle}>Items</Text>
-
         {order.items?.map((item: any, index: number) => (
           <View key={index} style={styles.itemCard}>
             <Image
@@ -117,7 +177,6 @@ export default function OrderDetails() {
               }
               style={styles.itemImage}
             />
-
             <View style={{ flex: 1 }}>
               <Text style={styles.itemName}>{item.name}</Text>
               <Text style={styles.itemQty}>
@@ -130,15 +189,54 @@ export default function OrderDetails() {
           </View>
         ))}
 
+        {/* TOTAL */}
         <Text style={styles.sectionTitle}>Total</Text>
         <Text style={styles.total}>${order.total.toFixed(2)}</Text>
 
+        {/* TRACK */}
         <TouchableOpacity
           style={styles.trackButton}
           onPress={() => router.replace(`/order/tracking?orderId=${orderId}`)}
         >
           <Text style={styles.trackText}>TRACK ORDER</Text>
         </TouchableOpacity>
+
+        {/* REFUND STATUS (LIVE) */}
+        {refund && (
+          <View style={styles.successBox}>
+            <Text style={styles.successText}>
+              Refund status: {refund.status.toUpperCase()}
+            </Text>
+          </View>
+        )}
+
+        {/* REQUEST REFUND */}
+        {canRequestRefund && (
+          <View style={{ marginTop: 30 }}>
+            <Text style={styles.sectionTitle}>Request a Refund</Text>
+
+            <TextInput
+              value={refundReason}
+              onChangeText={setRefundReason}
+              placeholder="Tell us what went wrong (optional)"
+              multiline
+              style={styles.refundInput}
+            />
+
+            <TouchableOpacity
+              onPress={handleRequestRefund}
+              disabled={requestingRefund}
+              style={[
+                styles.refundButton,
+                requestingRefund && { opacity: 0.6 },
+              ]}
+            >
+              <Text style={styles.refundButtonText}>
+                {requestingRefund ? "REQUESTING…" : "REQUEST REFUND"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </ScrollView>
     </View>
   );
@@ -148,7 +246,7 @@ export default function OrderDetails() {
    STYLES
 =========================== */
 const styles = StyleSheet.create({
-  page: { flex: 1, padding: 20 },
+  page: { padding: 20 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
 
   customerHeader: {
@@ -158,7 +256,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
   },
 
   headerTitle: { color: "white", fontSize: 22, fontWeight: "800" },
@@ -172,7 +269,6 @@ const styles = StyleSheet.create({
 
   homeButtonText: {
     color: "#e67e22",
-    fontSize: 16,
     fontWeight: "800",
   },
 
@@ -183,31 +279,18 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
 
-  label: { fontSize: 16, fontWeight: "700", color: "#333" },
-  value: { fontSize: 16, color: "#555", marginBottom: 10 },
-
+  label: { fontWeight: "700" },
+  value: { marginBottom: 10 },
   statusBadge: {
-    alignSelf: "flex-start",
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 20,
-    fontSize: 14,
-    fontWeight: "700",
     color: "white",
+    backgroundColor: "#3498db",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    alignSelf: "flex-start",
   },
 
-  pending: { backgroundColor: "#f39c12" },
-  paid: { backgroundColor: "#27ae60" },
-  processing: { backgroundColor: "#e67e22" },
-  shipped: { backgroundColor: "#3498db" },
-  delivered: { backgroundColor: "#2ecc71" },
-
-  sectionTitle: {
-    fontSize: 22,
-    fontWeight: "700",
-    marginTop: 10,
-    marginBottom: 10,
-  },
+  sectionTitle: { fontSize: 22, fontWeight: "700", marginVertical: 10 },
 
   itemCard: {
     flexDirection: "row",
@@ -217,26 +300,55 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
 
-  itemImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 10,
-    marginRight: 14,
-    backgroundColor: "#f5f5f5",
-  },
+  itemImage: { width: 80, height: 80, borderRadius: 10, marginRight: 14 },
 
-  itemName: { fontSize: 18, fontWeight: "700" },
-  itemQty: { fontSize: 14, marginTop: 5, color: "#555" },
-  itemTotal: { fontSize: 16, fontWeight: "700", marginTop: 5 },
+  itemName: { fontWeight: "700" },
+  itemQty: { color: "#555" },
+  itemTotal: { fontWeight: "700" },
 
-  total: { fontSize: 30, fontWeight: "800", marginBottom: 25 },
+  total: { fontSize: 30, fontWeight: "800" },
 
   trackButton: {
     backgroundColor: "#007bff",
     paddingVertical: 16,
     borderRadius: 10,
     alignItems: "center",
-    marginBottom: 40,
+    marginBottom: 20,
   },
-  trackText: { color: "white", fontSize: 18, fontWeight: "700" },
+
+  trackText: { color: "white", fontWeight: "700" },
+
+  refundInput: {
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 10,
+    padding: 12,
+    minHeight: 80,
+    marginBottom: 12,
+  },
+
+  refundButton: {
+    backgroundColor: "#c0392b",
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+
+  refundButtonText: {
+    color: "white",
+    fontWeight: "700",
+  },
+
+  successBox: {
+    backgroundColor: "#e8f8f5",
+    padding: 14,
+    borderRadius: 10,
+    marginTop: 20,
+  },
+
+  successText: {
+    color: "#1abc9c",
+    fontWeight: "700",
+    textAlign: "center",
+  },
 });

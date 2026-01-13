@@ -125,7 +125,7 @@ const cards: {
     route: "/admin/shipping-zones",
     roles: ["admin"],
   },
-  { title: "Payouts", emoji: "💵", route: "/admin/payouts", roles: ["admin"] },
+  { title: "Refund", emoji: "💵", route: "/admin/refunds", roles: ["admin"] },
 
   {
     title: "Notifications",
