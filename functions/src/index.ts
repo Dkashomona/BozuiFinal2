@@ -392,9 +392,7 @@ export const createCheckoutSession = onCall(
     /* ==========================================================
        STRIPE INIT
     ========================================================== */
-    const stripe = new Stripe(STRIPE_SECRET_KEY.value(), {
-      apiVersion: "2025-12-15.clover",
-    });
+    const stripe = new Stripe(STRIPE_SECRET_KEY.value());
 
     /* ==========================================================
        BUILD LINE ITEMS
@@ -501,88 +499,70 @@ export const createCheckoutSession = onCall(
    5) STRIPE WEBHOOK
 ========================================================== */
 export const stripeWebhook = onRequest(
-  { region: "us-central1", secrets: [STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET] },
-  async (req, res): Promise<void> => {
+  {
+    region: "us-central1",
+    secrets: [STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET],
+  },
+  async (req, res) => {
     const stripe = new Stripe(STRIPE_SECRET_KEY.value());
-    let event;
+
+    let event: Stripe.Event;
 
     try {
       event = stripe.webhooks.constructEvent(
         req.rawBody,
-        req.headers["stripe-signature"]!,
+        req.headers["stripe-signature"] as string,
         STRIPE_WEBHOOK_SECRET.value()
       );
     } catch (err: any) {
-      console.error("stripeWebhook signature error", err);
+      console.error("❌ Stripe signature verification failed:", err.message);
       res.status(400).send("Invalid signature");
       return;
     }
 
-    const data: any = event.data.object;
-
-    // ✅ PAYMENT COMPLETED
+    /* ----------------------------
+       CHECKOUT COMPLETED
+    ----------------------------- */
     if (event.type === "checkout.session.completed") {
-      const orderId = data.metadata.orderId;
-      const orderRef = db.collection("orders").doc(orderId);
-      const snap = await orderRef.get();
+      const session = event.data.object as Stripe.Checkout.Session;
 
-      const firestoreTotal = snap.data()!.total;
-      const stripeTotal = data.amount_total / 100;
+      const orderId = session.metadata?.orderId;
+      const paymentIntentId = session.payment_intent as string | null;
 
-      // 🔍 RECONCILIATION
-      if (firestoreTotal !== stripeTotal) {
-        await db.collection("order_discrepancies").add({
-          orderId,
-          firestoreTotal,
-          stripeTotal,
-          detectedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
+      if (orderId && paymentIntentId) {
+        await db.doc(`orders/${orderId}`).set(
+          {
+            status: "paid",
+            paymentIntentId,
+            paidAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
       }
-
-      await orderRef.update({
-        status: "paid",
-        paidAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
     }
 
-    // 🔁 REFUND
-    if (event.type === "charge.refunded") {
-      const orderId = data.metadata?.orderId;
-      if (!orderId) {
-        res.json({ received: true });
-        return;
+    /* ----------------------------
+       PAYMENT INTENT SUCCEEDED
+    ----------------------------- */
+    if (event.type === "payment_intent.succeeded") {
+      const pi = event.data.object as Stripe.PaymentIntent;
+      const orderId = pi.metadata?.orderId;
+
+      if (orderId) {
+        await db.doc(`orders/${orderId}`).set(
+          {
+            status: "paid",
+            paymentIntentId: pi.id,
+            paidAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
       }
-
-      const ref = db.collection("orders").doc(orderId);
-      const snap = await ref.get();
-      if (!snap.exists) {
-        res.json({ received: true });
-        return;
-      }
-
-      const batch = db.batch();
-
-      for (const item of snap.data()!.items) {
-        batch.update(db.collection("products").doc(item.id), {
-          stock: admin.firestore.FieldValue.increment(item.qty),
-        });
-      }
-
-      batch.update(ref, {
-        status: "refunded",
-        refundedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-
-      await batch.commit();
     }
 
     res.json({ received: true });
-    return;
   }
 );
-
-
-
 
 
 
@@ -872,29 +852,18 @@ export const backfillOrders = onCall(
   { region: "us-central1" },
   async (req) => {
     const uid = req.auth?.uid;
-    if (!uid) {
-      throw new HttpsError("unauthenticated", "Admin only");
-    }
+    if (!uid) throw new HttpsError("unauthenticated", "Admin only");
 
-    const userSnap = await db.collection("users").doc(uid).get();
-    if (userSnap.data()?.role !== "admin") {
+    const user = await db.collection("users").doc(uid).get();
+    if (user.data()?.role !== "admin")
       throw new HttpsError("permission-denied", "Admins only");
-    }
 
     const snap = await db.collection("orders").get();
     let updated = 0;
 
     for (const d of snap.docs) {
-      const o = d.data();
-
-      if (!o.amount && typeof o.total === "number") {
-        await d.ref.update({
-          subtotal: o.subtotal ?? o.total,
-          tax: o.tax ?? 0,
-          shipping: o.shipping ?? 0,
-          discount: o.discount ?? 0,
-          amount: Math.round(o.total * 100),
-        });
+      if (!d.data().amount && typeof d.data().total === "number") {
+        await d.ref.update({ amount: Math.round(d.data().total * 100) });
         updated++;
       }
     }
@@ -902,3 +871,117 @@ export const backfillOrders = onCall(
     return { updated };
   }
 );
+
+
+
+/* ==========================================================
+   EXECUTE REFUND (ADMIN ONLY — FINAL, SAFE)
+========================================================== */
+export const executeRefund = onCall(
+  { region: "us-central1", secrets: [STRIPE_SECRET_KEY] },
+  async (req) => {
+    // ✅ DO NOT set apiVersion (fixes TS error)
+    const stripe = new Stripe(STRIPE_SECRET_KEY.value());
+
+    const uid = req.auth?.uid;
+    const { requestId } = req.data;
+
+    if (!uid) {
+      throw new HttpsError("unauthenticated", "Login required");
+    }
+
+    if (!requestId) {
+      throw new HttpsError("invalid-argument", "Missing requestId");
+    }
+
+    const db = admin.firestore();
+
+    /* -------------------------------
+       VERIFY ADMIN
+    -------------------------------- */
+    const adminSnap = await db.doc(`users/${uid}`).get();
+    if (!adminSnap.exists || adminSnap.data()?.role !== "admin") {
+      throw new HttpsError("permission-denied", "Admins only");
+    }
+
+    /* -------------------------------
+       LOAD REFUND REQUEST
+    -------------------------------- */
+    const refundRef = db.doc(`refundRequests/${requestId}`);
+    const refundSnap = await refundRef.get();
+
+    if (!refundSnap.exists) {
+      throw new HttpsError("not-found", "Refund request not found");
+    }
+
+    const refund = refundSnap.data()!;
+
+    if (refund.status !== "pending") {
+      throw new HttpsError(
+        "failed-precondition",
+        "Refund already processed"
+      );
+    }
+
+    if (!refund.paymentIntentId) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Missing paymentIntentId"
+      );
+    }
+
+    /* -------------------------------
+       MARK AS PROCESSING
+    -------------------------------- */
+    await refundRef.update({
+      status: "processing",
+      processingAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    try {
+      /* -------------------------------
+         STRIPE REFUND (FULL)
+      -------------------------------- */
+      const stripeRefund = await stripe.refunds.create({
+        payment_intent: refund.paymentIntentId,
+      });
+
+      /* -------------------------------
+         FINALIZE
+      -------------------------------- */
+      await refundRef.update({
+        status: "refunded",
+        stripeRefundId: stripeRefund.id,
+        refundedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      await db.doc(`orders/${refund.orderId}`).update({
+        status: "refunded",
+        refundStatus: "refunded",
+      });
+
+      return {
+        success: true,
+        refundId: stripeRefund.id,
+      };
+    } catch (err: any) {
+      console.error("❌ executeRefund failed:", err);
+
+      await refundRef
+        .update({
+          status: "failed",
+          error: err.message,
+        })
+        .catch(() => {});
+
+      throw new HttpsError(
+        "internal",
+        err.message || "Refund failed"
+      );
+    }
+  }
+);
+
+
+
+
